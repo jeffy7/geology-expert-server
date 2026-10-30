@@ -1,12 +1,16 @@
 import express from 'express'
 import cors from 'cors'
+import dotenv from 'dotenv'
+import { testDbConnection } from './config/db'
 import authRoutes from './routes/auth'
 import projectRoutes from './routes/project'
 import expertRoutes from './routes/expert'
 import { successResponse, errorResponse } from './types'
 
+dotenv.config()
+
 const app = express()
-const PORT = 8080
+const PORT = process.env.PORT || 8080
 
 // 中间件配置
 app.use(cors())
@@ -47,7 +51,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   res.status(500).json(errorResponse(err.message || '内部服务处理异常', 500))
 })
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
+  await testDbConnection()
   console.log(`=======================================================`)
   console.log(` 🚀 地调院专家系统后端单体服务已成功启动！`)
   console.log(` 📡 监听端口: http://127.0.0.1:${PORT}`)

@@ -1,113 +1,258 @@
 import { Router } from 'express'
-import { successResponse } from '../types'
+import { pool } from '../config/db'
+import { successResponse, errorResponse } from '../types'
+import type { RowDataPacket, ResultSetHeader } from 'mysql2'
 
 const router = Router()
 
-// 模拟项目内存数据源
-let projectList = [
-  {
-    id: 1,
-    projectCode: 'NM-KC-2026-001',
-    projectName: '内蒙古某特大型稀土矿区深部储量核实评审',
-    declareUnit: '内蒙古自治区第七地质矿产勘查开发有限责任公司',
-    exploreUnit: '自治区第七地质勘查开发院',
-    reviewTime: '2026-11-05 09:00:00',
-    location: '自治区储量评审中心 301 会议室',
-    mineralType: '1',
-    auditStatus: 1,
-    auditStatusName: '已审核',
-    extractStatus: 1,
-    extractStatusName: '抽取中',
-    expertCount: 5,
-    confirmedCount: 3,
-    avoidExpertIds: [104],
-    createTime: '2026-10-25 10:00:00'
-  },
-  {
-    id: 2,
-    projectCode: 'NM-KC-2026-002',
-    projectName: '锡林郭勒盟白音华煤田勘探资源储量报告评审',
-    declareUnit: '内蒙古矿业集团技术研发部',
-    exploreUnit: '内蒙古煤田地质局109队',
-    reviewTime: '2026-11-08 14:30:00',
-    location: '自治区储量评审中心 302 会议室',
-    mineralType: '2',
-    auditStatus: 0,
-    auditStatusName: '未审核',
-    extractStatus: 0,
-    extractStatusName: '未抽取',
-    expertCount: 7,
-    confirmedCount: 0,
-    avoidExpertIds: [],
-    createTime: '2026-10-28 14:20:00'
-  }
-]
+// 1. 获取项目台账列表 GET /etbApi/project/list
+router.get('/list', async (req, res) => {
+  try {
+    const { projectCode, projectName, extractStatus, page = '1', pageSize = '10' } = req.query
+    const p = Math.max(1, parseInt(page as string, 10))
+    const ps = Math.max(1, parseInt(pageSize as string, 10))
+    const offset = (p - 1) * ps
 
-// 项目列表 GET /etbApi/project/list
-router.get('/list', (req, res) => {
-  const { projectCode, projectName, extractStatus } = req.query
-  let result = [...projectList]
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
 
-  if (projectCode) {
-    result = result.filter(p => p.projectCode.includes(projectCode as string))
-  }
-  if (projectName) {
-    result = result.filter(p => p.projectName.includes(projectName as string))
-  }
-  if (extractStatus !== undefined && extractStatus !== '') {
-    result = result.filter(p => p.extractStatus === Number(extractStatus))
-  }
+    if (projectCode) {
+      whereClause += ' AND project_code LIKE ?'
+      params.push(`%${projectCode}%`)
+    }
+    if (projectName) {
+      whereClause += ' AND project_name LIKE ?'
+      params.push(`%${projectName}%`)
+    }
+    if (extractStatus !== undefined && extractStatus !== '') {
+      whereClause += ' AND extract_status = ?'
+      params.push(Number(extractStatus))
+    }
 
-  res.json(successResponse({
-    records: result,
-    total: result.length
-  }))
+    const [countRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as total FROM biz_project ${whereClause}`,
+      params
+    )
+    const total = countRows[0].total
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        id, 
+        project_code as projectCode, 
+        project_name as projectName, 
+        declare_unit as declareUnit, 
+        explore_unit as exploreUnit, 
+        DATE_FORMAT(review_time, '%Y-%m-%d %H:%i') as reviewTime, 
+        location, 
+        mineral_type as mineralType, 
+        audit_status as auditStatus, 
+        extract_status as extractStatus,
+        expert_count as expertCount,
+        confirmed_count as confirmedCount,
+        create_by as createBy,
+        DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s') as createTime
+       FROM biz_project 
+       ${whereClause} 
+       ORDER BY id DESC 
+       LIMIT ? OFFSET ?`,
+      [...params, ps, offset]
+    )
+
+    // 映射状态名称
+    const records = rows.map(r => ({
+      ...r,
+      auditStatusName: r.auditStatus === 1 ? '已审核' : (r.auditStatus === 2 ? '已驳回' : '未审核'),
+      status: r.extractStatus,
+      statusName: r.extractStatus === 2 ? '已抽取' : (r.extractStatus === 1 ? '抽取中' : '未抽取'),
+      extractStatusName: r.extractStatus === 2 ? '已抽取' : (r.extractStatus === 1 ? '抽取中' : '未抽取')
+    }))
+
+    res.json(successResponse({
+      records,
+      total,
+      current: p,
+      size: ps
+    }))
+  } catch (error: any) {
+    console.error('查询项目列表失败:', error)
+    res.status(500).json(errorResponse(error.message || '查询项目列表异常'))
+  }
 })
 
-// 项目详情 GET /etbApi/project/detail/:id
-router.get('/detail/:id', (req, res) => {
-  const id = Number(req.params.id)
-  const item = projectList.find(p => p.id === id)
-  if (!item) {
-    res.status(404).json({ code: 404, message: '项目不存在', success: false })
-    return
-  }
-  res.json(successResponse(item))
-})
+// 2. 获取项目详情 GET /etbApi/project/detail/:id
+router.get('/detail/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id)
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        id, 
+        project_code as projectCode, 
+        project_name as projectName, 
+        declare_unit as declareUnit, 
+        explore_unit as exploreUnit, 
+        DATE_FORMAT(review_time, '%Y-%m-%d %H:%i:%s') as reviewTime, 
+        location, 
+        mineral_type as mineralType, 
+        remark,
+        audit_status as auditStatus, 
+        extract_status as extractStatus,
+        audit_opinion as auditOpinion,
+        expert_count as expertCount,
+        confirmed_count as confirmedCount,
+        DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s') as createTime
+       FROM biz_project 
+       WHERE id = ?`,
+      [id]
+    )
 
-// 创建/修改项目 POST /etbApi/project/save
-router.post('/save', (req, res) => {
-  const data = req.body
-  if (data.id) {
-    const index = projectList.findIndex(p => p.id === data.id)
-    if (index !== -1) {
-      projectList[index] = { ...projectList[index], ...data }
-      res.json(successResponse(projectList[index], '项目更新成功'))
+    if (rows.length === 0) {
+      res.status(404).json(errorResponse('项目不存在', 404))
       return
     }
-  }
 
-  const newItem = {
-    id: projectList.length + 1,
-    projectCode: data.projectCode || `NM-KC-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-    projectName: data.projectName,
-    declareUnit: data.declareUnit,
-    exploreUnit: data.exploreUnit || '',
-    reviewTime: data.reviewTime,
-    location: data.location || '自治区储量评审中心会议室',
-    mineralType: data.mineralType || '1',
-    auditStatus: 0,
-    auditStatusName: '未审核',
-    extractStatus: 0,
-    extractStatusName: '未抽取',
-    expertCount: 5,
-    confirmedCount: 0,
-    avoidExpertIds: [],
-    createTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
+    // 查回避专家
+    const [avoidRows] = await pool.query<RowDataPacket[]>(
+      `SELECT expert_id FROM biz_project_avoid_expert WHERE project_id = ?`,
+      [id]
+    )
+    const avoidExpertIds = avoidRows.map(r => r.expert_id)
+
+    // 查预抽规则
+    const [ruleRows] = await pool.query<RowDataPacket[]>(
+      `SELECT * FROM biz_project_extract_rule WHERE project_id = ?`,
+      [id]
+    )
+    const rule = ruleRows[0] || null
+
+    res.json(successResponse({
+      ...rows[0],
+      avoidExpertIds,
+      rule: rule ? {
+        totalExpertCount: rule.total_expert_count,
+        backupRatio: rule.backup_ratio,
+        leaderLevel: rule.leader_level,
+        leaderMajorId: rule.leader_major_id,
+        memberRules: rule.member_rules_json ? JSON.parse(rule.member_rules_json) : []
+      } : null
+    }))
+  } catch (error: any) {
+    res.status(500).json(errorResponse(error.message || '获取项目详情异常'))
   }
-  projectList.unshift(newItem)
-  res.json(successResponse(newItem, '项目创建成功'))
+})
+
+// 3. 新建或修改项目申报 POST /etbApi/project/save
+router.post('/save', async (req, res) => {
+  try {
+    const data = req.body
+    if (data.id) {
+      // 更新
+      await pool.query<ResultSetHeader>(
+        `UPDATE biz_project SET 
+          project_name = ?, 
+          declare_unit = ?, 
+          explore_unit = ?, 
+          review_time = ?, 
+          location = ?, 
+          mineral_type = ?, 
+          remark = ?
+         WHERE id = ?`,
+        [
+          data.projectName,
+          data.declareUnit,
+          data.exploreUnit || '',
+          data.reviewTime,
+          data.location || '自治区储量评审中心会议室',
+          Number(data.mineralType) || 1,
+          data.remark || '',
+          data.id
+        ]
+      )
+      res.json(successResponse({ id: data.id }, '项目修改成功'))
+      return
+    }
+
+    // 新增
+    const projectCode = data.projectCode || `NM-KC-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`
+    const [result] = await pool.query<ResultSetHeader>(
+      `INSERT INTO biz_project 
+        (project_code, project_name, declare_unit, explore_unit, review_time, location, mineral_type, remark, audit_status, extract_status, expert_count, confirmed_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 5, 0)`,
+      [
+        projectCode,
+        data.projectName,
+        data.declareUnit,
+        data.exploreUnit || '',
+        data.reviewTime,
+        data.location || '自治区储量评审中心会议室',
+        Number(data.mineralType) || 1,
+        data.remark || ''
+      ]
+    )
+
+    res.json(successResponse({ id: result.insertId, projectCode }, '项目申报创建成功'))
+  } catch (error: any) {
+    console.error('保存项目失败:', error)
+    res.status(500).json(errorResponse(error.message || '保存项目异常'))
+  }
+})
+
+// 4. 保存回避专家穿梭框设置 POST /etbApi/project/saveAvoidExperts
+router.post('/saveAvoidExperts', async (req, res) => {
+  try {
+    const { projectId, avoidExpertIds = [] } = req.body
+    if (!projectId) {
+      res.status(400).json(errorResponse('项目ID必填', 400))
+      return
+    }
+
+    // 先删除已有的回避设置
+    await pool.query('DELETE FROM biz_project_avoid_expert WHERE project_id = ?', [projectId])
+
+    // 重新写入
+    if (avoidExpertIds.length > 0) {
+      const values = avoidExpertIds.map((eid: number) => [projectId, eid])
+      await pool.query('INSERT INTO biz_project_avoid_expert (project_id, expert_id) VALUES ?', [values])
+    }
+
+    res.json(successResponse({ count: avoidExpertIds.length }, '回避专家配置已保存'))
+  } catch (error: any) {
+    res.status(500).json(errorResponse(error.message || '保存回避专家失败'))
+  }
+})
+
+// 5. 保存预查条件与抽取规则 POST /etbApi/project/saveExtractRule
+router.post('/saveExtractRule', async (req, res) => {
+  try {
+    const { projectId, totalExpertCount, backupRatio, leaderLevel, leaderMajor, memberRules } = req.body
+    if (!projectId) {
+      res.status(400).json(errorResponse('项目ID必填', 400))
+      return
+    }
+
+    const memberJson = JSON.stringify(memberRules || [])
+    await pool.query(
+      `INSERT INTO biz_project_extract_rule 
+        (project_id, total_expert_count, backup_ratio, leader_level, leader_major_id, member_rules_json)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+        total_expert_count = VALUES(total_expert_count),
+        backup_ratio = VALUES(backup_ratio),
+        leader_level = VALUES(leader_level),
+        leader_major_id = VALUES(leader_major_id),
+        member_rules_json = VALUES(member_rules_json)`,
+      [projectId, totalExpertCount || 5, backupRatio || 2, leaderLevel || 'province', leaderMajor || '1', memberJson]
+    )
+
+    // 更新项目目标人数并送审
+    await pool.query(
+      `UPDATE biz_project SET expert_count = ?, audit_status = 0 WHERE id = ?`,
+      [totalExpertCount || 5, projectId]
+    )
+
+    res.json(successResponse({ projectId }, '抽签条件已保存并送审审查科！'))
+  } catch (error: any) {
+    res.status(500).json(errorResponse(error.message || '保存抽签条件失败'))
+  }
 })
 
 export default router
-

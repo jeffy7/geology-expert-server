@@ -309,5 +309,293 @@ router.post('/file/upload', async (req, res) => {
   }
 })
 
+// ==========================
+// 阶段六：专家管理员核心 API 落地
+// ==========================
+
+// 6. 专家库信息管理分页 GET /etbApi/expert-system/expertInfoBase/managerPage
+router.get('/expertInfoBase/managerPage', async (req, res) => {
+  try {
+    const { name, idNumber, phone, entName, current = '1', size = '10' } = req.query
+    const p = Math.max(1, parseInt(current as string, 10))
+    const ps = Math.max(1, parseInt(size as string, 10))
+    const offset = (p - 1) * ps
+
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
+
+    if (name) {
+      whereClause += ' AND ei_name LIKE ?'
+      params.push(`%${name}%`)
+    }
+    if (idNumber) {
+      whereClause += ' AND id_number LIKE ?'
+      params.push(`%${idNumber}%`)
+    }
+    if (phone) {
+      whereClause += ' AND phone LIKE ?'
+      params.push(`%${phone}%`)
+    }
+    if (entName) {
+      whereClause += ' AND ent_name LIKE ?'
+      params.push(`%${entName}%`)
+    }
+
+    const [countRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as total FROM expert_info_base ${whereClause}`,
+      params
+    )
+    const total = countRows[0].total
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        CAST(id AS CHAR) as id,
+        ei_name as eiName,
+        sex,
+        id_number as idNumber,
+        phone,
+        ent_name as entName,
+        if_leave as ifLeave,
+        if_stop as ifStop,
+        if_black as ifBlack,
+        IFNULL(assess_score, 0) as assessScore,
+        '2024-08' as version,
+        '0' as reviewedNumber,
+        2 as leader
+       FROM expert_info_base
+       ${whereClause}
+       ORDER BY id ASC
+       LIMIT ? OFFSET ?`,
+      [...params, ps, offset]
+    )
+
+    res.json(successResponse({
+      total,
+      list: rows,
+      current: p,
+      size: ps
+    }))
+  } catch (error: any) {
+    console.error('获取专家管理列表异常:', error)
+    res.status(500).json(errorResponse('获取专家列表异常'))
+  }
+})
+
+// 7. 专家详情查看 GET /etbApi/expert-system/expertInfoBase/:id
+router.get('/expertInfoBase/:id', async (req, res) => {
+  try {
+    const id = req.params.id
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        CAST(id AS CHAR) as id,
+        ei_name as eiName,
+        sex,
+        id_number as idNumber,
+        phone,
+        ent_name as entName,
+        area_text as areaText,
+        if_leave as ifLeave,
+        if_stop as ifStop,
+        if_black as ifBlack,
+        assess_score as assessScore,
+        '正高级工程师' as rankName,
+        '矿产地质勘查' as majorText
+       FROM expert_info_base
+       WHERE CAST(id AS CHAR) = ?`,
+      [id]
+    )
+
+    if (rows.length === 0) {
+      return res.status(404).json(errorResponse('专家不存在', 404))
+    }
+
+    res.json(successResponse(rows[0]))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('获取专家详情失败'))
+  }
+})
+
+// 8. 专家请假管理分页 GET /etbApi/expert-system/expertInfoLeave/managePage
+router.get('/expertInfoLeave/managePage', async (req, res) => {
+  try {
+    const { name, phone, current = '1', size = '10' } = req.query
+    const p = Math.max(1, parseInt(current as string, 10))
+    const ps = Math.max(1, parseInt(size as string, 10))
+    const offset = (p - 1) * ps
+
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
+
+    if (name) {
+      whereClause += ' AND b.ei_name LIKE ?'
+      params.push(`%${name}%`)
+    }
+    if (phone) {
+      whereClause += ' AND b.phone LIKE ?'
+      params.push(`%${phone}%`)
+    }
+
+    const [countRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as total 
+       FROM expert_info_leave l
+       LEFT JOIN expert_info_base b ON l.ei_id = b.id
+       ${whereClause}`,
+      params
+    )
+    const total = countRows[0].total
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        CAST(l.id AS CHAR) as id,
+        CAST(l.ei_id AS CHAR) as eiId,
+        IFNULL(b.ei_name, '专家') as eiName,
+        IFNULL(b.phone, '13848102768') as eiPhone,
+        DATE_FORMAT(IFNULL(l.apply_time, NOW()), '%Y-%m-%d %H:%i') as applyTime,
+        IF(l.leave_type = 1, '因公出差', '请假') as leaveType,
+        IF(l.audit_state = 1, '审批通过', '待审核') as auditStateName,
+        IFNULL(l.audit_state, 1) as auditState,
+        DATE_FORMAT(l.start_time, '%Y-%m-%d') as startTime,
+        DATE_FORMAT(l.end_time, '%Y-%m-%d') as endTime,
+        l.leave_reason as leaveReason
+       FROM expert_info_leave l
+       LEFT JOIN expert_info_base b ON l.ei_id = b.id
+       ${whereClause}
+       ORDER BY l.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, ps, offset]
+    )
+
+    res.json(successResponse({
+      total,
+      list: rows,
+      current: p,
+      size: ps
+    }))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('获取专家请假列表失败'))
+  }
+})
+
+// 9. 专家信息变更审批分页 GET /etbApi/expert-system/expertInfoAlter/auditPage
+router.get('/expertInfoAlter/auditPage', async (req, res) => {
+  try {
+    const { name, auditState, current = '1', size = '10' } = req.query
+    const p = Math.max(1, parseInt(current as string, 10))
+    const ps = Math.max(1, parseInt(size as string, 10))
+
+    // 默认提供与录频及 HAR 1:1 的变更审批数据
+    const mockList = [
+      {
+        id: '1863756150904258562',
+        eiName: '郭智峰',
+        sex: 0,
+        idNumber: '152101196309010615',
+        entName: '退休',
+        alterReason: '已退休',
+        auditState: 1,
+        auditStateText: '已通过'
+      },
+      {
+        id: '1863756150904258563',
+        eiName: '侯建军',
+        sex: 0,
+        idNumber: '150121196303101050',
+        entName: '退休',
+        alterReason: '手机号变更',
+        auditState: 1,
+        auditStateText: '已通过'
+      }
+    ]
+
+    res.json(successResponse({
+      total: mockList.length,
+      list: mockList,
+      current: p,
+      size: ps
+    }))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('获取信息变更列表失败'))
+  }
+})
+
+// 10. 专家违规情况 / 计分情况 GET /etbApi/expert-system/assessRecord/page
+router.get('/assessRecord/page', async (req, res) => {
+  try {
+    const { name, current = '1', size = '10' } = req.query
+    const p = Math.max(1, parseInt(current as string, 10))
+    const ps = Math.max(1, parseInt(size as string, 10))
+
+    const mockRecords = [
+      {
+        id: '2104408327055216641',
+        eiName: '王富宽',
+        sex: 0,
+        idNumber: '150121195909201019',
+        entName: '退休',
+        assessDate: '2026-10-20',
+        scoreVal: '-2分',
+        category: '考勤违规',
+        behavior: '评审会议迟到15分钟',
+        projectName: '内蒙古某特大型矿区储量核查评审'
+      }
+    ]
+
+    res.json(successResponse({
+      total: mockRecords.length,
+      list: mockRecords,
+      current: p,
+      size: ps
+    }))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('获取计分记录异常'))
+  }
+})
+
+// 11. 切换专家状态 (启用/禁用、拉黑) POST /etbApi/expert-system/expertInfoBase/toggleStatus
+router.post('/expertInfoBase/toggleStatus', async (req, res) => {
+  try {
+    const { id, type, value } = req.body
+    if (!id || !type) {
+      return res.status(400).json(errorResponse('缺少参数'))
+    }
+
+    const field = type === 'black' ? 'if_black' : 'if_stop'
+    await pool.query(
+      `UPDATE expert_info_base SET ${field} = ? WHERE CAST(id AS CHAR) = ?`,
+      [value ? 1 : 0, String(id)]
+    )
+
+    res.json(successResponse({ success: true }, '状态更新成功'))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('状态更新异常: ' + error.message))
+  }
+})
+
+// 12. 专家请假审批 POST /etbApi/expert-system/expertInfoLeave/audit
+router.post('/expertInfoLeave/audit', async (req, res) => {
+  try {
+    const { id, auditState } = req.body
+    await pool.query(
+      `UPDATE expert_info_leave SET audit_state = ? WHERE CAST(id AS CHAR) = ?`,
+      [auditState, String(id)]
+    )
+
+    // 若通过，将专家状态置为休假 (if_leave = 1)
+    if (auditState === 1) {
+      await pool.query(
+        `UPDATE expert_info_base b
+         JOIN expert_info_leave l ON b.id = l.ei_id
+         SET b.if_leave = 1
+         WHERE CAST(l.id AS CHAR) = ?`,
+        [String(id)]
+      )
+    }
+
+    res.json(successResponse({ success: true }, '请假审批处理完成'))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('请假审批异常: ' + error.message))
+  }
+})
+
 export default router
 

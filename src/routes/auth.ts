@@ -266,35 +266,72 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
       }
     )
   } else if (identityRole === 'IdentityRole_36') {
-    // 专家管理员 (zjgly)
+    // 专家管理员 (zjgly) - 1:1 对齐 HAR 与真实截屏
     menus.push(
       {
-        id: 5,
-        name: 'ExpertManage',
-        path: '/expertManage',
-        redirect: '/expertManage/infoManagement/list',
-        meta: { title: '专家库全息管理', icon: 'Management' },
+        id: 50,
+        name: 'ExpertDatabaseManagement',
+        path: '/expertDatabaseManagement',
+        redirect: '/infoManagement/list',
+        meta: { title: '专家库管理', icon: 'Management' },
         children: [
           {
             id: 51,
-            name: 'ExpertInfoList',
-            path: 'infoManagement/list',
-            component: 'expert/list',
-            meta: { title: '专家库信息台账' }
+            name: 'ChangeApprovalList',
+            path: '/changeApproval/list',
+            component: 'expert/changeList',
+            meta: { title: '专家信息变更审批' }
           },
           {
             id: 52,
-            name: 'ScoringSituation',
-            path: 'scoringSituation',
-            component: 'expert/scoring',
-            meta: { title: '计分与违规闭环' }
+            name: 'ExpertInfoList',
+            path: '/infoManagement/list',
+            component: 'expert/list',
+            meta: { title: '专家库信息管理' }
           },
           {
             id: 53,
             name: 'VacateList',
-            path: 'vacate/list',
+            path: '/vacate/list',
             component: 'expert/vacate',
-            meta: { title: '专家请假审批' }
+            meta: { title: '专家请假管理' }
+          },
+          {
+            id: 54,
+            name: 'ScoringSituation',
+            path: '/infoManagement/scoringSituation',
+            component: 'expert/scoring',
+            meta: { title: '计分情况', hidden: true }
+          },
+          {
+            id: 55,
+            name: 'ExpertViolation',
+            path: '/infoManagement/expertViolation',
+            component: 'expert/violation',
+            meta: { title: '专家违规情况', hidden: true }
+          },
+          {
+            id: 56,
+            name: 'ChangeApprovalView',
+            path: '/changeApproval/view',
+            component: 'expert/changeView',
+            meta: { title: '信息变更查看', hidden: true }
+          }
+        ]
+      },
+      {
+        id: 60,
+        name: 'EvaluationAndAssessment',
+        path: '/evaluationAndAssessment',
+        redirect: '/evaluate',
+        meta: { title: '评价与考核', icon: 'DocumentChecked' },
+        children: [
+          {
+            id: 61,
+            name: 'EvaluationByJudges',
+            path: '/evaluate',
+            component: 'evaluation/evaluationByJudges',
+            meta: { title: '评委评价' }
           }
         ]
       }

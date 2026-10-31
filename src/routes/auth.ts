@@ -196,14 +196,14 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
         name: 'Supervision',
         path: '/supervision',
         redirect: '/supervision/jurySelection',
-        meta: { title: '监督审批管理', icon: 'Checked' },
+        meta: { title: '抽取审批管理', icon: 'Checked' },
         children: [
           {
             id: 41,
             name: 'JurySelection',
             path: 'jurySelection',
             component: 'supervision/jurySelection',
-            meta: { title: '评委抽取审批工作台' }
+            meta: { title: '评委抽取审批' }
           }
         ]
       }
@@ -223,21 +223,28 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             name: 'ExtractList',
             path: 'extract/list',
             component: 'extract/list',
-            meta: { title: '抽取管理列表' }
+            meta: { title: '抽取管理' }
           },
           {
-            id: 33,
+            id: 32,
             name: 'ExtractDetail',
             path: 'extract/detail',
             component: 'extract/detail',
-            meta: { title: '智能抽取与外呼详情' }
+            meta: { title: '专家抽取与查看', hidden: true }
+          },
+          {
+            id: 33,
+            name: 'ExtractExecute',
+            path: 'extract/extract',
+            component: 'extract/detail',
+            meta: { title: '专家抽取执行', hidden: true }
           },
           {
             id: 34,
             name: 'SupplementDetail',
             path: 'supplement/detail',
             component: 'extract/supplementDetail',
-            meta: { title: '项目补抽管理' }
+            meta: { title: '项目补抽', hidden: true }
           }
         ]
       }

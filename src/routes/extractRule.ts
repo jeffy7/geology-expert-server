@@ -205,7 +205,10 @@ router.post('/sextRule/extract', async (req, res) => {
 
     // 随机选拔 1 位替补专家
     const [candidates] = await pool.query<RowDataPacket[]>(
-      `SELECT * FROM expert WHERE is_deleted = 0 ORDER BY RAND() LIMIT 1`
+      `SELECT CAST(id AS CHAR) as id, ei_name as name, phone, id_number as card_no, ent_name as company 
+       FROM expert_info_base 
+       WHERE if_stop = 0 AND if_leave = 0 
+       ORDER BY RAND() LIMIT 1`
     )
     if (candidates.length === 0) {
       return res.status(400).json(errorResponse('专家库可用替补专家不足'))
@@ -215,13 +218,13 @@ router.post('/sextRule/extract', async (req, res) => {
 
     await pool.query(
       `INSERT INTO extract_rule_result (
-        id, project_id, rule_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
+        id, project_id, rule_id, condition_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
         ei_ent_name, ei_rank, ei_majors, extract_time, notice_state, participate_state, confirm_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1, 1, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1, 1, NOW())`,
       [
-        supplementResultId, pId, rId, conditionKey || `${rId}_Crew_Supplement`,
+        supplementResultId, pId, rId, String(Date.now()) + '9', conditionKey || `${rId}_Crew_Supplement`,
         expert.id, expert.name, expert.phone, expert.card_no || '150101198505050022',
-        expert.company || '自治区地质环境监测院', expert.title || '高级工程师', expert.major || '水文地质与环境地质'
+        expert.company || '自治区地质环境监测院', '高级工程师', '水文地质与环境地质'
       ]
     )
 
@@ -741,14 +744,20 @@ router.post('/extractActive/startExtract', async (req, res) => {
 
     const pId = projectId || ruleId
 
-    // 从 expert 表中按需选拔 1 名组长（正高级职称优先）和 4 名组员
+    // 从 expert_info_base 表中按需选拔 1 名组长（优先从在库正常专家随机）和 4 名组员
     const [leaderCandidates] = await pool.query<RowDataPacket[]>(
-      `SELECT * FROM expert WHERE is_deleted = 0 ORDER BY RAND() LIMIT 1`
+      `SELECT CAST(id AS CHAR) as id, ei_name as name, phone, id_number as card_no, ent_name as company 
+       FROM expert_info_base 
+       WHERE if_stop = 0 AND if_leave = 0 
+       ORDER BY RAND() LIMIT 1`
     )
     const leader = leaderCandidates[0]
 
     const [crewCandidates] = await pool.query<RowDataPacket[]>(
-      `SELECT * FROM expert WHERE is_deleted = 0 ${leader ? 'AND id != ' + leader.id : ''} ORDER BY RAND() LIMIT 4`
+      `SELECT CAST(id AS CHAR) as id, ei_name as name, phone, id_number as card_no, ent_name as company 
+       FROM expert_info_base 
+       WHERE if_stop = 0 AND if_leave = 0 ${leader ? "AND CAST(id AS CHAR) != '" + leader.id + "'" : ''} 
+       ORDER BY RAND() LIMIT 4`
     )
 
     // 清理旧的抽取结果
@@ -760,14 +769,15 @@ router.post('/extractActive/startExtract', async (req, res) => {
     // 插入组长
     if (leader) {
       const leaderId = Date.now().toString() + '1'
+      const conditionId = Date.now().toString() + '8'
       await pool.query(
         `INSERT INTO extract_rule_result (
-          id, project_id, rule_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
+          id, project_id, rule_id, condition_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
           ei_ent_name, ei_rank, ei_majors, extract_time, notice_state, participate_state, confirm_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          leaderId, pId, rId, `${rId}_Leader_ConditionKey0`, leader.id, leader.name, leader.phone, leader.card_no || '150101198001010011',
-          leader.company || '自治区国土空间规划院', leader.title || '正高级工程师', leader.major || '水文地质与工程地质',
+          leaderId, pId, rId, conditionId, `${rId}_Leader_ConditionKey0`, leader.id, leader.name, leader.phone, leader.card_no || '150101198001010011',
+          leader.company || '自治区国土空间规划院', '正高级工程师', '水文地质与工程地质',
           now, 1, 1, now
         ]
       )
@@ -777,14 +787,15 @@ router.post('/extractActive/startExtract', async (req, res) => {
     let idx = 1
     for (const crew of crewCandidates) {
       const crewId = Date.now().toString() + (idx + 1)
+      const crewCondId = Date.now().toString() + (idx + 8)
       await pool.query(
         `INSERT INTO extract_rule_result (
-          id, project_id, rule_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
+          id, project_id, rule_id, condition_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
           ei_ent_name, ei_rank, ei_majors, extract_time, notice_state, participate_state, confirm_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          crewId, pId, rId, `${rId}_Crew_ConditionKey${idx}`, crew.id, crew.name, crew.phone, crew.card_no || '150101198505050022',
-          crew.company || '自治区地质勘查局', crew.title || '高级工程师', crew.major || '勘查技术与工程',
+          crewId, pId, rId, crewCondId, `${rId}_Crew_ConditionKey${idx}`, crew.id, crew.name, crew.phone, crew.card_no || '150101198505050022',
+          crew.company || '自治区地质勘查局', '高级工程师', '勘查技术与工程',
           now, 1, 1, now
         ]
       )
@@ -807,17 +818,17 @@ router.post('/extractPreRule/previewMatch', async (req, res) => {
   try {
     const { avoidCompanies = [], avoidExpertIds = [] } = req.body
 
-    let queryStr = `SELECT CAST(id AS CHAR) as id, name, phone, card_no as cardNo, company, title, major FROM expert WHERE is_deleted = 0`
+    let queryStr = `SELECT CAST(id AS CHAR) as id, ei_name as name, phone, id_number as cardNo, ent_name as company, '高级工程师' as title, '矿产地质勘查' as major FROM expert_info_base WHERE if_stop = 0 AND if_leave = 0`
     const params: any[] = []
 
     if (avoidCompanies.length > 0) {
-      queryStr += ` AND company NOT IN (${avoidCompanies.map(() => '?').join(',')})`
+      queryStr += ` AND ent_name NOT IN (${avoidCompanies.map(() => '?').join(',')})`
       params.push(...avoidCompanies)
     }
 
     if (avoidExpertIds.length > 0) {
-      queryStr += ` AND id NOT IN (${avoidExpertIds.map(() => '?').join(',')})`
-      params.push(...avoidExpertIds)
+      queryStr += ` AND CAST(id AS CHAR) NOT IN (${avoidExpertIds.map(() => '?').join(',')})`
+      params.push(...avoidExpertIds.map((id: any) => String(id)))
     }
 
     queryStr += ` ORDER BY id ASC LIMIT 50`
@@ -834,7 +845,8 @@ router.post('/extractPreRule/previewMatch', async (req, res) => {
       }))
     }, '预查专家池计算完成'))
   } catch (error: any) {
-    res.status(500).json(errorResponse('预查计算失败'))
+    console.error('预查计算失败:', error)
+    res.status(500).json(errorResponse('预查计算失败: ' + error.message))
   }
 })
 

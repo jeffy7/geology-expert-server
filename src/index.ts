@@ -6,6 +6,7 @@ import authRoutes from './routes/auth'
 import projectRoutes from './routes/project'
 import expertRoutes from './routes/expert'
 import expertSystemRoutes from './routes/expertSystem'
+import extractRuleRoutes from './routes/extractRule'
 import { successResponse, errorResponse } from './types'
 
 dotenv.config()
@@ -38,6 +39,8 @@ app.get('/etbApi/health', (_req, res) => {
 // 路由挂载 (统一收敛至 /etbApi/ 前缀，原生 HAR 契约 1:1 对齐)
 app.use('/etbApi/etbuser', authRoutes)
 app.use('/etbApi/expert-system', expertSystemRoutes)
+app.use('/etbApi/expert-system', extractRuleRoutes)
+app.use('/etbApi/brace', extractRuleRoutes)
 app.use('/etbApi/project', projectRoutes)
 app.use('/etbApi/expert', expertRoutes)
 app.use('/etbApi/expert-notice', expertRoutes)

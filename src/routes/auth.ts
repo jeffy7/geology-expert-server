@@ -132,14 +132,42 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             name: 'ExtractList',
             path: 'extract/list',
             component: 'extract/list',
-            meta: { title: '抽取管理列表' }
+            meta: { title: '抽取管理' }
           },
           {
             id: 32,
+            name: 'PreExtractList',
+            path: 'preExtract/list',
+            component: 'extract/preList',
+            meta: { title: '专家预抽取管理' }
+          },
+          {
+            id: 33,
             name: 'PreExtractPreview',
             path: 'preExtract/preview',
             component: 'extract/prePreview',
-            meta: { title: '预查条件与回避设置' }
+            meta: { title: '预查条件与回避设置', hidden: true }
+          },
+          {
+            id: 34,
+            name: 'ExtractDetail',
+            path: 'extract/detail',
+            component: 'extract/detail',
+            meta: { title: '专家抽取与查看', hidden: true }
+          },
+          {
+            id: 35,
+            name: 'ExtractExecute',
+            path: 'extract/extract',
+            component: 'extract/detail',
+            meta: { title: '专家抽取执行', hidden: true }
+          },
+          {
+            id: 36,
+            name: 'ExtractApplication',
+            path: 'extract/application',
+            component: 'extract/detail',
+            meta: { title: '抽取申请', hidden: true }
           }
         ]
       },

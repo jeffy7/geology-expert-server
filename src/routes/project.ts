@@ -79,30 +79,13 @@ router.get('/list', async (req, res) => {
   }
 })
 
-// 2. 获取项目详情 GET /etbApi/project/detail/:id
+// 2. 获取项目详情 GET /etbApi/project/detail/:id (兼容兜底重定向到 expert-system)
 router.get('/detail/:id', async (req, res) => {
   try {
-    const id = Number(req.params.id)
+    const id = req.params.id
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT 
-        id, 
-        project_code as projectCode, 
-        project_name as projectName, 
-        declare_unit as declareUnit, 
-        explore_unit as exploreUnit, 
-        DATE_FORMAT(review_time, '%Y-%m-%d %H:%i:%s') as reviewTime, 
-        location, 
-        mineral_type as mineralType, 
-        remark,
-        audit_status as auditStatus, 
-        extract_status as extractStatus,
-        audit_opinion as auditOpinion,
-        expert_count as expertCount,
-        confirmed_count as confirmedCount,
-        DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s') as createTime
-       FROM biz_project 
-       WHERE id = ?`,
-      [id]
+      `SELECT * FROM project WHERE id = ? OR project_no = ?`,
+      [id, id]
     )
 
     if (rows.length === 0) {
@@ -110,22 +93,24 @@ router.get('/detail/:id', async (req, res) => {
       return
     }
 
+    const r = rows[0]
     // 查回避专家
     const [avoidRows] = await pool.query<RowDataPacket[]>(
       `SELECT expert_id FROM biz_project_avoid_expert WHERE project_id = ?`,
-      [id]
+      [r.id]
     )
-    const avoidExpertIds = avoidRows.map(r => r.expert_id)
+    const avoidExpertIds = avoidRows.map(row => row.expert_id)
 
     // 查预抽规则
     const [ruleRows] = await pool.query<RowDataPacket[]>(
       `SELECT * FROM biz_project_extract_rule WHERE project_id = ?`,
-      [id]
+      [r.id]
     )
     const rule = ruleRows[0] || null
 
     res.json(successResponse({
-      ...rows[0],
+      ...r,
+      id: String(r.id),
       avoidExpertIds,
       rule: rule ? {
         totalExpertCount: rule.total_expert_count,

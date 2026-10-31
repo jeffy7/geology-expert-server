@@ -117,8 +117,8 @@ router.get('/expert-system-project/:id', async (req, res) => {
         review_category as reviewCategory,
         ext_info as extInfo
        FROM project 
-       WHERE id = ?`,
-      [id]
+       WHERE id = ? OR project_no = ?`,
+      [id, id]
     )
 
     if (rows.length === 0) {
@@ -132,8 +132,31 @@ router.get('/expert-system-project/:id', async (req, res) => {
       ext = r.extInfo ? JSON.parse(r.extInfo) : {}
     } catch (e) {}
 
+    // 查询回避专家 ID 列表
+    const [avoidRows] = await pool.query<RowDataPacket[]>(
+      `SELECT expert_id FROM biz_project_avoid_expert WHERE project_id = ?`,
+      [r.id]
+    )
+    const avoidExpertIds = avoidRows.map(row => row.expert_id)
+
+    // 查询预抽取规则
+    const [ruleRows] = await pool.query<RowDataPacket[]>(
+      `SELECT * FROM biz_project_extract_rule WHERE project_id = ?`,
+      [r.id]
+    )
+    const ruleItem = ruleRows[0] || null
+
     res.json(successResponse({
       ...r,
+      id: String(r.id),
+      avoidExpertIds,
+      rule: ruleItem ? {
+        totalExpertCount: ruleItem.total_expert_count,
+        backupRatio: ruleItem.backup_ratio,
+        leaderLevel: ruleItem.leader_level,
+        leaderMajorId: ruleItem.leader_major_id,
+        memberRules: ruleItem.member_rules_json ? JSON.parse(ruleItem.member_rules_json) : []
+      } : null,
       inputOrgName: ext.inputOrgName || '',
       docRoom: ext.docRoom || '',
       applyReasonName: ext.applyReasonName || '',
@@ -287,3 +310,4 @@ router.post('/file/upload', async (req, res) => {
 })
 
 export default router
+

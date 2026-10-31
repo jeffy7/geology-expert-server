@@ -266,7 +266,7 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
       }
     )
   } else if (identityRole === 'IdentityRole_36') {
-    // 专家管理员 (zjgly) - 1:1 对齐 HAR 与真实截屏
+    // 专家管理员 (zjgly) - 1:1 对齐 HAR 与真实截屏全息菜单
     menus.push(
       {
         id: 50,
@@ -298,20 +298,48 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
           },
           {
             id: 54,
+            name: 'ProfessionalManagement',
+            path: '/professionalManagement',
+            component: 'expert/professionalManagement',
+            meta: { title: '专家专业管理' }
+          },
+          {
+            id: 55,
+            name: 'ExpertTitleManagement',
+            path: '/expertTItleManagement',
+            component: 'expert/titleManagement',
+            meta: { title: '专家职称管理' }
+          },
+          {
+            id: 56,
+            name: 'ExpertExpertise',
+            path: '/expertExpertise',
+            component: 'expert/expertiseManagement',
+            meta: { title: '专家所学专业管理' }
+          },
+          {
+            id: 57,
+            name: 'ExpertEducation',
+            path: '/expertEducation',
+            component: 'expert/educationManagement',
+            meta: { title: '专家学历管理' }
+          },
+          {
+            id: 58,
             name: 'ScoringSituation',
             path: '/infoManagement/scoringSituation',
             component: 'expert/scoring',
             meta: { title: '计分情况', hidden: true }
           },
           {
-            id: 55,
+            id: 59,
             name: 'ExpertViolation',
             path: '/infoManagement/expertViolation',
             component: 'expert/violation',
             meta: { title: '专家违规情况', hidden: true }
           },
           {
-            id: 56,
+            id: 60,
             name: 'ChangeApprovalView',
             path: '/changeApproval/view',
             component: 'expert/changeView',
@@ -320,18 +348,50 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
         ]
       },
       {
-        id: 60,
+        id: 70,
         name: 'EvaluationAndAssessment',
         path: '/evaluationAndAssessment',
         redirect: '/evaluate',
         meta: { title: '评价与考核', icon: 'DocumentChecked' },
         children: [
           {
-            id: 61,
+            id: 71,
             name: 'EvaluationByJudges',
             path: '/evaluate',
             component: 'evaluation/evaluationByJudges',
             meta: { title: '评委评价' }
+          }
+        ]
+      },
+      {
+        id: 80,
+        name: 'ProjectDictionaries',
+        path: '/projectDictionaries',
+        redirect: '/dictionariesView',
+        meta: { title: '项目字典管理', icon: 'Collection' },
+        children: [
+          {
+            id: 81,
+            name: 'DictionariesView',
+            path: '/dictionariesView',
+            component: 'dict/dictionariesView',
+            meta: { title: '项目字典' }
+          }
+        ]
+      },
+      {
+        id: 90,
+        name: 'SystemTools',
+        path: '/systemTools',
+        redirect: '/SMSSending',
+        meta: { title: '系统工具', icon: 'Tools' },
+        children: [
+          {
+            id: 91,
+            name: 'SMSSending',
+            path: '/SMSSending',
+            component: 'tool/smsSending',
+            meta: { title: '短信群发' }
           }
         ]
       }

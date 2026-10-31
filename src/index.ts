@@ -7,6 +7,7 @@ import projectRoutes from './routes/project'
 import expertRoutes from './routes/expert'
 import expertSystemRoutes from './routes/expertSystem'
 import extractRuleRoutes from './routes/extractRule'
+import dictToolsRoutes from './routes/dictTools'
 import { successResponse, errorResponse } from './types'
 
 dotenv.config()
@@ -40,7 +41,10 @@ app.get('/etbApi/health', (_req, res) => {
 app.use('/etbApi/etbuser', authRoutes)
 app.use('/etbApi/expert-system', expertSystemRoutes)
 app.use('/etbApi/expert-system', extractRuleRoutes)
+app.use('/etbApi/expert-system', dictToolsRoutes)
 app.use('/etbApi/brace', extractRuleRoutes)
+app.use('/etbApi/brace', dictToolsRoutes)
+app.use('/etbApi/iot', dictToolsRoutes)
 app.use('/etbApi/project', projectRoutes)
 app.use('/etbApi/expert', expertRoutes)
 app.use('/etbApi/expert-notice', expertRoutes)

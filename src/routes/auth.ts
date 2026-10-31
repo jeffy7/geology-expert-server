@@ -88,7 +88,7 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
 
   // 按角色分发菜单
   if (identityRole === 'IdentityRole_33') {
-    // 立项人 (lxr)
+    // 立项人 (lxr) - 严格 1:1 对齐 HAR 真实菜单树
     menus.push(
       {
         id: 2,
@@ -102,7 +102,7 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             name: 'ProjectList',
             path: 'list',
             component: 'project/list',
-            meta: { title: '项目台账列表' }
+            meta: { title: '项目列表' }
           },
           {
             id: 22,
@@ -110,6 +110,13 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             path: 'edit',
             component: 'project/edit',
             meta: { title: '项目申报录入', hidden: true }
+          },
+          {
+            id: 23,
+            name: 'ProjectDetail',
+            path: 'detail',
+            component: 'project/detail',
+            meta: { title: '项目详情查看', hidden: true }
           }
         ]
       },
@@ -133,6 +140,22 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             path: 'preExtract/preview',
             component: 'extract/prePreview',
             meta: { title: '预查条件与回避设置' }
+          }
+        ]
+      },
+      {
+        id: 6,
+        name: 'EvaluationAndAssessment',
+        path: '/evaluationAndAssessment',
+        redirect: '/evaluationAndAssessment/evaluationByJudges',
+        meta: { title: '评价与考核', icon: 'DocumentChecked' },
+        children: [
+          {
+            id: 61,
+            name: 'EvaluationByJudges',
+            path: 'evaluationByJudges',
+            component: 'evaluation/evaluationByJudges',
+            meta: { title: '评委评价' }
           }
         ]
       }

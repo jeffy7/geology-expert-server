@@ -37,7 +37,7 @@ router.get('/expert-system-project/page', async (req, res) => {
 
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT 
-        id, 
+        CAST(id AS CHAR) as id, 
         project_no as projectNo, 
         project_name as projectName, 
         project_source as projectSource,
@@ -97,7 +97,7 @@ router.get('/expert-system-project/:id', async (req, res) => {
     const id = req.params.id
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT 
-        id, 
+        CAST(id AS CHAR) as id, 
         project_no as projectNo, 
         project_name as projectName, 
         project_source as projectSource,
@@ -117,8 +117,8 @@ router.get('/expert-system-project/:id', async (req, res) => {
         review_category as reviewCategory,
         ext_info as extInfo
        FROM project 
-       WHERE id = ? OR project_no = ?`,
-      [id, id]
+       WHERE CAST(id AS CHAR) = ? OR project_no = ?`,
+      [String(id), String(id)]
     )
 
     if (rows.length === 0) {

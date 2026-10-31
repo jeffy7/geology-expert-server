@@ -209,42 +209,58 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
       }
     )
   } else if (identityRole === 'IdentityRole_35') {
-    // 评审中心 (pszx)
+    // 评审中心 (pszx) - 1:1 对齐 HAR 与真实截屏
     menus.push(
       {
-        id: 3,
-        name: 'ExpertExtract',
-        path: '/expertExtract',
+        id: 31,
+        name: 'ExpertExtractionRecord',
+        path: '/expertExtractionRecord',
         redirect: '/expertExtract/extract/list',
-        meta: { title: '专家抽取管理', icon: 'UserFilled' },
+        meta: { title: '专家抽取记录', icon: 'UserFilled' },
         children: [
           {
-            id: 31,
+            id: 311,
             name: 'ExtractList',
-            path: 'extract/list',
+            path: '/expertExtract/extract/list',
             component: 'extract/list',
             meta: { title: '抽取管理' }
           },
           {
-            id: 32,
+            id: 312,
+            name: 'SupplementList',
+            path: '/expertExtract/supplement/list',
+            component: 'extract/supplementList',
+            meta: { title: '项目补抽' }
+          },
+          {
+            id: 313,
             name: 'ExtractDetail',
-            path: 'extract/detail',
+            path: '/expertExtract/extract/detail',
             component: 'extract/detail',
-            meta: { title: '专家抽取与查看', hidden: true }
+            meta: { title: '抽取详情', hidden: true }
           },
           {
-            id: 33,
-            name: 'ExtractExecute',
-            path: 'extract/extract',
-            component: 'extract/detail',
-            meta: { title: '专家抽取执行', hidden: true }
-          },
-          {
-            id: 34,
+            id: 314,
             name: 'SupplementDetail',
-            path: 'supplement/detail',
+            path: '/expertExtract/supplement/detail',
             component: 'extract/supplementDetail',
-            meta: { title: '项目补抽', hidden: true }
+            meta: { title: '项目补抽详情', hidden: true }
+          }
+        ]
+      },
+      {
+        id: 32,
+        name: 'ExtractionAndApproval',
+        path: '/supervision',
+        redirect: '/jurySelection',
+        meta: { title: '抽取审批管理', icon: 'Checked' },
+        children: [
+          {
+            id: 321,
+            name: 'JurySelection',
+            path: '/jurySelection',
+            component: 'supervision/jurySelection',
+            meta: { title: '评委抽取审批' }
           }
         ]
       }

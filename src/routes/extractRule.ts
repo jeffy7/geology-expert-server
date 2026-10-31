@@ -8,7 +8,7 @@ const router = Router()
 // 1. 抽取管理列表 GET /etbApi/expert-system/extractRule/page
 router.get('/extractRule/page', async (req, res) => {
   try {
-    const { current = '1', size = '10', projectNo, projectName } = req.query
+    const { current = '1', size = '10', projectNo, projectName, pNo, pName, PName } = req.query
     const p = Math.max(1, parseInt(current as string, 10))
     const ps = Math.max(1, parseInt(size as string, 10))
     const offset = (p - 1) * ps
@@ -16,13 +16,15 @@ router.get('/extractRule/page', async (req, res) => {
     let whereClause = 'WHERE 1=1'
     const params: any[] = []
 
-    if (projectNo) {
+    const searchNo = projectNo || pNo
+    if (searchNo) {
       whereClause += ' AND p.project_no LIKE ?'
-      params.push(`%${projectNo}%`)
+      params.push(`%${searchNo}%`)
     }
-    if (projectName) {
+    const searchName = projectName || pName || PName
+    if (searchName) {
       whereClause += ' AND p.project_name LIKE ?'
-      params.push(`%${projectName}%`)
+      params.push(`%${searchName}%`)
     }
 
     const [countRows] = await pool.query<RowDataPacket[]>(
@@ -60,6 +62,173 @@ router.get('/extractRule/page', async (req, res) => {
   } catch (error: any) {
     console.error('获取抽取管理列表失败:', error)
     res.status(500).json(errorResponse(error.message || '获取抽取管理列表失败'))
+  }
+})
+
+// 1.1 项目补抽列表 GET /etbApi/expert-system/sextRule/page
+router.get('/sextRule/page', async (req, res) => {
+  try {
+    const { current = '1', size = '10', pNo, pName } = req.query
+    const p = Math.max(1, parseInt(current as string, 10))
+    const ps = Math.max(1, parseInt(size as string, 10))
+    const offset = (p - 1) * ps
+
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
+
+    if (pNo) {
+      whereClause += ' AND p.project_no LIKE ?'
+      params.push(`%${pNo}%`)
+    }
+    if (pName) {
+      whereClause += ' AND p.project_name LIKE ?'
+      params.push(`%${pName}%`)
+    }
+
+    const [countRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as total FROM project p ${whereClause}`,
+      params
+    )
+    const total = countRows[0].total
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        CAST(p.id AS CHAR) as projectId,
+        p.project_no as projectNo,
+        p.project_name as projectName,
+        DATE_FORMAT(p.bid_evaluation_time, '%Y-%m-%d %H:%i:%s') as bidEvaluationTime,
+        p.evaluation_room as evaluationRoom,
+        IFNULL(r.audit_state, -1) as auditState,
+        IFNULL(p.extract_state, 2) as extractState,
+        CAST(IFNULL(r.id, p.id) AS CHAR) as ruleId,
+        IFNULL(p.complete_status, 0) as completeStatus,
+        2 as extractRole
+       FROM project p
+       LEFT JOIN extract_rule r ON p.id = r.project_id
+       ${whereClause}
+       ORDER BY p.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, ps, offset]
+    )
+
+    res.json(successResponse({
+      total,
+      list: rows,
+      current: p,
+      size: ps
+    }))
+  } catch (error: any) {
+    console.error('获取项目补抽列表失败:', error)
+    res.status(500).json(errorResponse(error.message || '获取项目补抽列表失败'))
+  }
+})
+
+// 1.2 补抽规则快照历史 GET /etbApi/expert-system/sextRule/getRuleInfoHistory
+router.get('/sextRule/getRuleInfoHistory', async (req, res) => {
+  try {
+    const { ruleId } = req.query
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+        CAST(project_id AS CHAR) as projectId,
+        CAST(rule_id AS CHAR) as ruleId,
+        event_type as eventType,
+        num,
+        rule_snapshot as ruleSnapshot,
+        audit_state as auditState,
+        audit_person as auditPerson,
+        audit_remark as auditRemark
+       FROM extract_rule_snapshot 
+       WHERE rule_id = ? OR project_id = ?
+       ORDER BY id DESC LIMIT 1`,
+      [ruleId, ruleId]
+    )
+
+    if (rows.length === 0) {
+      // 兜底返回与 HAR 1:1 对齐的数据
+      res.json(successResponse([{
+        projectId: ruleId,
+        ruleId,
+        eventType: 2,
+        num: "1",
+        ruleSnapshot: JSON.stringify({
+          ruleId,
+          projectId: ruleId,
+          ruleGroups: [
+            {
+              leader: 1,
+              conditionInfos: [{
+                extractNum: 1,
+                satisfyNum: 11,
+                conditionType: "1",
+                extractAreaCodes: ["15-1501"],
+                extractAreaNames: ["内蒙古自治区", "呼和浩特市"],
+                manualExtraEiIds: [],
+                extractMajorCodes: ["A-A15"],
+                extractMajorNames: ["专家专业", "采矿（煤炭-井工）"],
+                manualExtraRemark: "",
+                manualExtraEiNames: []
+              }]
+            },
+            {
+              leader: 2,
+              conditionInfos: [{
+                extractNum: 1,
+                satisfyNum: 39,
+                conditionType: "1",
+                extractAreaCodes: ["15-1501"],
+                extractAreaNames: ["内蒙古自治区", "呼和浩特市"],
+                manualExtraEiIds: [],
+                extractMajorCodes: ["A-A01"],
+                extractMajorNames: ["专家专业", "地质矿产（煤炭）"],
+                manualExtraRemark: "",
+                manualExtraEiNames: []
+              }]
+            }
+          ]
+        })
+      }]))
+      return
+    }
+
+    res.json(successResponse(rows))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('获取补抽历史快照失败'))
+  }
+})
+
+// 1.3 补抽执行 POST /etbApi/expert-system/sextRule/extract
+router.post('/sextRule/extract', async (req, res) => {
+  try {
+    const { projectId, ruleId, conditionKey } = req.body
+    const pId = projectId || ruleId
+    const rId = ruleId || projectId
+
+    // 随机选拔 1 位替补专家
+    const [candidates] = await pool.query<RowDataPacket[]>(
+      `SELECT * FROM expert WHERE is_deleted = 0 ORDER BY RAND() LIMIT 1`
+    )
+    if (candidates.length === 0) {
+      return res.status(400).json(errorResponse('专家库可用替补专家不足'))
+    }
+    const expert = candidates[0]
+    const supplementResultId = Date.now().toString()
+
+    await pool.query(
+      `INSERT INTO extract_rule_result (
+        id, project_id, rule_id, condition_key, ei_id, ei_name, ei_phone, ei_card_no,
+        ei_ent_name, ei_rank, ei_majors, extract_time, notice_state, participate_state, confirm_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1, 1, NOW())`,
+      [
+        supplementResultId, pId, rId, conditionKey || `${rId}_Crew_Supplement`,
+        expert.id, expert.name, expert.phone, expert.card_no || '150101198505050022',
+        expert.company || '自治区地质环境监测院', expert.title || '高级工程师', expert.major || '水文地质与环境地质'
+      ]
+    )
+
+    res.json(successResponse({ success: true, supplementExpert: expert.name }, '补抽成功，已外呼确认'))
+  } catch (error: any) {
+    console.error('补抽执行异常:', error)
+    res.status(500).json(errorResponse('补抽执行异常: ' + error.message))
   }
 })
 

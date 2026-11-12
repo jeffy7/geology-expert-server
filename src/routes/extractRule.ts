@@ -1367,36 +1367,81 @@ router.get('/extractActive/getRuleResultByPIdAndRuleId', async (req, res) => {
 router.get('/extractActive/getCurrentExtractResult', async (req, res) => {
   try {
     const { ruleId, pId } = req.query
+    const targetId = ruleId || pId
+    if (!targetId) {
+      return res.status(400).json(errorResponse('缺少 ruleId 或 pId'))
+    }
+
+    // 1. 获取关联规则与项目的抽取状态
+    const [ruleRows] = await pool.query<RowDataPacket[]>(
+      `SELECT r.extract_state as extractState, r.audit_state as auditState, r.project_id as projectId
+       FROM extract_rule r WHERE r.id = ? OR r.project_id = ? LIMIT 1`,
+      [targetId, targetId]
+    )
+    const currentExtractState = ruleRows[0]?.extractState ?? 2
+
+    // 2. 查询抽取明细结果（通过 condition 表关联或 key 关键字动态计算组长组员标识，规避表无 leader 字段问题）
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT 
         CAST(r.id AS CHAR) as id,
         CAST(r.ei_id AS CHAR) as expertId,
+        CAST(r.ei_id AS CHAR) as eiId,
         r.ei_name as expertName,
+        r.ei_name as eiName,
         r.ei_phone as phone,
+        r.ei_phone as eiPhone,
         r.ei_card_no as idCard,
+        r.ei_card_no as eiCardNo,
         r.ei_ent_name as company,
+        r.ei_ent_name as eiEntName,
         r.ei_rank as title,
+        r.ei_rank as eiRank,
         r.ei_majors as major,
-        r.leader as roleType,
-        IF(r.leader = 1, '组长', '组员') as roleName,
+        r.ei_majors as eiMajors,
+        IF(c.group_id = '1' OR c.group_id LIKE '%Leader%' OR r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader,
+        IF(c.group_id = '1' OR c.group_id LIKE '%Leader%' OR r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as roleType,
+        IF(c.group_id = '1' OR c.group_id LIKE '%Leader%' OR r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', '组长', '组员') as roleName,
         r.notice_state as noticeState,
         r.participate_state as participateState,
+        COALESCE(r.avoidance_flag, 0) as avoidanceFlag,
+        COALESCE(r.avoidance_flag, 0) as isAvoid,
+        r.avoidance_remark as avoidanceRemark,
         CASE 
+          WHEN r.avoidance_flag = 1 THEN '已回避'
           WHEN r.participate_state = 1 THEN '已确认'
           WHEN r.participate_state = 0 THEN '已拒绝'
-          WHEN r.participate_state = 2 THEN '已回避'
           WHEN r.notice_state = 1 THEN '已通知'
           ELSE '未通知'
         END as status,
         DATE_FORMAT(r.extract_time, '%Y-%m-%d %H:%i:%s') as extractTime
        FROM extract_rule_result r
-       WHERE (r.rule_id = ? OR r.project_id = ?) AND (r.avoidance_flag IS NULL OR r.avoidance_flag = 0)
-       ORDER BY r.leader ASC, r.id ASC`,
-      [ruleId || pId, pId || ruleId]
+       LEFT JOIN extract_rule_condition c ON r.condition_id = c.id
+       WHERE (r.rule_id = ? OR r.project_id = ?)
+       ORDER BY leader ASC, r.id ASC`,
+      [targetId, targetId]
     )
-    res.json(successResponse(rows))
+
+    const leaderList = rows.filter((item: any) => item.leader === 1 || item.roleName === '组长')
+    const memberList = rows.filter((item: any) => item.leader !== 1 && item.roleName !== '组长')
+
+    // 组织符合原系统 GetCurrentExtractResultVO 的数据结构
+    const vo = {
+      currentExtractState,
+      currentExtractingState: 0,
+      result: rows,
+      leaderList,
+      memberList,
+      leaders: leaderList,
+      members: memberList,
+      crewList: memberList,
+      errMsg: null,
+      noticeMessageDTOList: []
+    }
+
+    res.json(successResponse(vo))
   } catch (error: any) {
-    res.status(500).json(errorResponse('获取实时抽取结果失败'))
+    console.error('获取实时抽取结果异常:', error)
+    res.status(500).json(errorResponse('获取实时抽取结果失败: ' + error.message))
   }
 })
 
@@ -1649,6 +1694,56 @@ router.post('/extractRuleAudit/audit', async (req, res) => {
     res.json(successResponse(null, isPass ? '抽取申请审批已通过！' : '抽取申请已被驳回！'))
   } catch (error: any) {
     res.status(500).json(errorResponse(error.message))
+  }
+})
+
+// ==========================================
+// 12. 专家现场/事后回避 POST /extractActive/avoidance
+// ==========================================
+router.post('/extractActive/avoidance', async (req, res) => {
+  try {
+    const { projectId, querys = [] } = req.body
+    if (!projectId) {
+      return res.status(400).json(errorResponse('项目ID必填'))
+    }
+
+    if (!Array.isArray(querys) || querys.length === 0) {
+      return res.status(400).json(errorResponse('回避专家列表不能为空'))
+    }
+
+    // 1. 批量标记回避状态
+    for (const q of querys) {
+      const eiId = q.eiId || q.id
+      const reason = q.reason || q.avoidanceRemark || '立项人设置回避'
+      if (eiId) {
+        await pool.query(
+          `UPDATE extract_rule_result 
+           SET avoidance_flag = 1, avoidance_time = NOW(), avoidance_remark = ?
+           WHERE (project_id = ? OR rule_id = ?) AND ei_id = ?`,
+          [reason, projectId, projectId, eiId]
+        )
+      }
+    }
+
+    // 2. 检查是否有未完成的补抽，若无则初始化补抽待办
+    const [existingSext] = await pool.query<RowDataPacket[]>(
+      `SELECT id FROM extract_rule WHERE project_id = ? AND event_type = 2 AND extract_state = 0 LIMIT 1`,
+      [projectId]
+    )
+
+    if (existingSext.length === 0) {
+      const sextRuleId = Date.now().toString()
+      await pool.query(
+        `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
+         VALUES (?, ?, 2, 1, 0, NOW())`,
+        [sextRuleId, projectId]
+      )
+    }
+
+    res.json(successResponse(null, '专家回避登记成功，已生成补抽待办！'))
+  } catch (error: any) {
+    console.error('专家回避登记失败:', error)
+    res.status(500).json(errorResponse('专家回避登记失败: ' + error.message))
   }
 })
 

@@ -194,13 +194,42 @@ router.post('/saveAvoidExperts', async (req, res) => {
     // 先删除已有的回避设置
     await pool.query('DELETE FROM biz_project_avoid_expert WHERE project_id = ?', [targetProjectId])
 
-    // 重新写入
+    // 重新写入 biz_project_avoid_expert 配置表
     if (avoidExpertIds.length > 0) {
       const values = avoidExpertIds.map((eid: any) => [targetProjectId, eid])
       await pool.query('INSERT INTO biz_project_avoid_expert (project_id, expert_id) VALUES ?', [values])
+
+      // 联动核心抽取结果表 extract_rule_result：将被选中的专家标记为已回避
+      await pool.query(
+        `UPDATE extract_rule_result 
+         SET avoidance_flag = 1, avoidance_time = NOW(), avoidance_remark = '立项人设置回避'
+         WHERE (project_id = ? OR rule_id = ?) AND ei_id IN (?)`,
+        [targetProjectId, targetProjectId, avoidExpertIds]
+      )
+
+      // 自动检查并生成补抽待办
+      const [existingSext] = await pool.query<RowDataPacket[]>(
+        `SELECT id FROM extract_rule WHERE project_id = ? AND event_type = 2 AND extract_state = 0 LIMIT 1`,
+        [targetProjectId]
+      )
+      if (existingSext.length === 0) {
+        await pool.query(
+          `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
+           VALUES (?, ?, 2, 1, 0, NOW())`,
+          [Date.now().toString(), targetProjectId]
+        )
+      }
+    } else {
+      // 若清空了回避列表，将该项目未补抽的回避状态重置
+      await pool.query(
+        `UPDATE extract_rule_result 
+         SET avoidance_flag = 0, avoidance_time = NULL, avoidance_remark = NULL
+         WHERE (project_id = ? OR rule_id = ?)`,
+        [targetProjectId, targetProjectId]
+      )
     }
 
-    res.json(successResponse({ count: avoidExpertIds.length }, '回避专家配置已保存'))
+    res.json(successResponse({ count: avoidExpertIds.length }, '专家回避设置已成功更新生效！'))
   } catch (error: any) {
     res.status(500).json(errorResponse(error.message || '保存回避专家失败'))
   }

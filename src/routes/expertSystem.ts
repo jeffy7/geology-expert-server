@@ -1,7 +1,51 @@
 import { Router } from 'express'
+import path from 'path'
+import fs from 'fs'
+import multer from 'multer'
 import { pool } from '../config/db'
 import { successResponse, errorResponse } from '../types'
 import type { RowDataPacket, ResultSetHeader } from 'mysql2'
+
+// ==============================================================================
+// 【内网机房配置备忘】原地调院生产内网私有 MinIO 附件服务配置
+// 架构说明：原生产系统通过机房局域网内部 MinIO 进行大文件分布式存储，历史库桶名为 bigfile。
+// 待后续项目正式向地调院政务内网/机房专网环境割接交付时，解开下方注释并切换上传实现即可。
+//
+// export const INTRANET_MINIO_CONFIG = {
+//   endpoint: 'http://192.168.4.119:9400', // 内网私有局域网 MinIO 节点
+//   bucket: 'bigfile',                      // 附件存储桶名称
+//   accessKey: 'minioadmin',               // 机房内网访问凭证 (按需替换)
+//   secretKey: 'minioadmin',               // 机房内网密钥 (按需替换)
+//   visitEndpoint: 'http://192.168.4.119:9400/bigfile'
+// }
+// ==============================================================================
+
+// 现阶段：文件直接上传并持久化至当前云服务器磁盘目录
+const uploadDir = path.join(__dirname, '../../uploads')
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true })
+}
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadDir)
+  },
+  filename: (_req, file, cb) => {
+    const fileId = String(Date.now())
+    let originalName = file.originalname
+    try {
+      // 修复 multer 中文文件名 latin1 乱码
+      originalName = Buffer.from(file.originalname, 'latin1').toString('utf8')
+    } catch (e) {}
+    const safeName = originalName.replace(/[/\\?%*:|"<>]/g, '_')
+    cb(null, `${fileId}_${safeName}`)
+  }
+})
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 } // 限制单文件 100MB
+})
 
 const router = Router()
 
@@ -313,6 +357,37 @@ router.post('/expert-system-project', async (req, res) => {
       ]
     )
 
+    // 1:1 对齐原系统 ExpertSystemEventListener.onProjectCreate:
+    // 1. 初始化正式抽取规则 (event_type=1, audit_state=-1未提交, extract_state=0未抽取)
+    const ruleId = String(Date.now()) + Math.floor(1000 + Math.random() * 9000)
+    await pool.query(
+      `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
+       VALUES (?, ?, 1, -1, 0, NOW())`,
+      [ruleId, newId]
+    )
+
+    // 2. 初始化预抽取规则 (event_type=0, audit_state=1审核通过, extract_state=2已就绪)
+    const preRuleId = String(Date.now() + 1) + Math.floor(1000 + Math.random() * 9000)
+    await pool.query(
+      `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
+       VALUES (?, ?, 0, 1, 2, NOW())`,
+      [preRuleId, newId]
+    )
+
+    // 3. 初始化评委评价记录 assess_record
+    await pool.query(
+      `INSERT INTO assess_record (project_id, evaluate_status, insert_time)
+       VALUES (?, 0, NOW())`,
+      [newId]
+    )
+
+    // 4. 初始化项目操作人记录 project_operator
+    await pool.query(
+      `INSERT INTO project_operator (project_id, operator_time, operator_id, operator_name, incident)
+       VALUES (?, NOW(), 1, '立项人', 0)`,
+      [newId]
+    )
+
     res.json(successResponse({ id: newId, projectNo }, '操作成功!'))
   } catch (error: any) {
     console.error('保存项目失败:', error)
@@ -350,46 +425,61 @@ router.post('/file/query/list', async (req, res) => {
   }
 })
 
-// 5. 附件上传 POST /etbApi/expert-system/file/upload
-router.post('/file/upload', async (req, res) => {
+// 5. 附件上传 POST /etbApi/expert-system/file/upload (支持真实文件流与 JSON 兼容)
+router.post('/file/upload', upload.single('file'), async (req, res) => {
   try {
-    const newFileId = String(Date.now())
-    const fileName = req.body?.fileName || `矿产储量评审报告附件_${newFileId}.docx`
-    const fileSize = Number(req.body?.fileSize) || 358400
-    
-    // 动态智能解析真实扩展名与 Content-Type (安全控制在 60 字符以内防止字段溢出)
-    const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'docx'
+    let newFileId = String(Date.now())
+    let fileName = ''
+    let fileSize = 0
     let fileSuffix = 'application/octet-stream'
-    if (ext === 'pdf') {
-      fileSuffix = 'application/pdf'
-    } else if (ext === 'docx' || ext === 'doc') {
-      fileSuffix = 'application/msword'
-    } else if (ext === 'xlsx' || ext === 'xls') {
-      fileSuffix = 'application/vnd.ms-excel'
-    } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
-      fileSuffix = `image/${ext === 'jpg' ? 'jpeg' : ext}`
+    let fileUrl = ''
+
+    if (req.file) {
+      // 真实文件二进制上传落盘
+      try {
+        fileName = Buffer.from(req.file.originalname, 'latin1').toString('utf8')
+      } catch (e) {
+        fileName = req.file.originalname
+      }
+      fileSize = req.file.size
+      fileSuffix = req.file.mimetype || 'application/octet-stream'
+      fileUrl = `/uploads/${req.file.filename}`
+      newFileId = req.file.filename.split('_')[0] || newFileId
     } else {
-      fileSuffix = ext
+      // 兼容 JSON 传参降级模式
+      fileName = req.body?.fileName || `矿产储量评审报告附件_${newFileId}.docx`
+      fileSize = Number(req.body?.fileSize) || 358400
+      
+      const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'docx'
+      if (ext === 'pdf') {
+        fileSuffix = 'application/pdf'
+      } else if (ext === 'docx' || ext === 'doc') {
+        fileSuffix = 'application/msword'
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        fileSuffix = 'application/vnd.ms-excel'
+      } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
+        fileSuffix = `image/${ext === 'jpg' ? 'jpeg' : ext}`
+      } else {
+        fileSuffix = ext
+      }
+
+      const safeDiskName = `${newFileId}_${fileName.replace(/[/\\?%*:|"<>]/g, '_')}`
+      fileUrl = `/uploads/${safeDiskName}`
+
+      try {
+        const diskPath = path.join(uploadDir, safeDiskName)
+        if (!fs.existsSync(diskPath)) {
+          fs.writeFileSync(diskPath, Buffer.from(`内蒙古地调院矿产专家评审附件存根: ${fileName}\n上传时间: ${new Date().toLocaleString()}\n`))
+        }
+      } catch (e) {}
     }
 
-    // 生成本地静态服务可直接访问和下载的真实 URL
-    const safeDiskName = `${newFileId}_${fileName.replace(/[/\\?%*:|"<>]/g, '_')}`
-    const fileUrl = `/uploads/${safeDiskName}`
-
-    // 在本地 uploads 目录创建真实文件存根，确保点击下载时绝不 404
-    try {
-      const fs = require('fs')
-      const path = require('path')
-      const diskPath = path.join(__dirname, '../../uploads', safeDiskName)
-      if (!fs.existsSync(diskPath)) {
-        fs.writeFileSync(diskPath, Buffer.from(`内蒙古地调院矿产专家评审附件存根: ${fileName}\n上传时间: ${new Date().toLocaleString()}\n`))
-      }
-    } catch (e) {}
+    const uploadUser = req.body?.uploadUser || '立项人'
 
     await pool.query(
       `INSERT INTO sys_file (id, file_name, file_url, file_size, file_suffix, upload_time, insert_person_name)
-       VALUES (?, ?, ?, ?, ?, NOW(), '立项人')`,
-      [newFileId, fileName, fileUrl, fileSize, fileSuffix]
+       VALUES (?, ?, ?, ?, ?, NOW(), ?)`,
+      [newFileId, fileName, fileUrl, fileSize, fileSuffix, uploadUser]
     )
 
     res.json(successResponse({
@@ -397,7 +487,8 @@ router.post('/file/upload', async (req, res) => {
       fileName,
       fileUrl,
       fileSize,
-      fileSuffix
+      fileSuffix,
+      uploadTime: new Date().toISOString()
     }, '文件上传成功'))
   } catch (error: any) {
     console.error('上传文件异常:', error)

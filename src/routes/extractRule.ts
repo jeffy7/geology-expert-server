@@ -107,18 +107,26 @@ router.get('/extractRule/page', async (req, res) => {
       params.push(`%${searchName}%`)
     }
     if (extractState !== undefined && extractState !== '') {
-      whereClause += ' AND r.extract_state = ?'
-      params.push(extractState)
+      if (String(extractState) === '0') {
+        whereClause += ' AND (r.extract_state IS NULL OR r.extract_state = 0)'
+      } else {
+        whereClause += ' AND r.extract_state = ?'
+        params.push(extractState)
+      }
     }
     if (auditState !== undefined && auditState !== '') {
-      whereClause += ' AND r.audit_state = ?'
-      params.push(auditState)
+      if (String(auditState) === '-1') {
+        whereClause += ' AND (r.audit_state IS NULL OR r.audit_state = -1)'
+      } else {
+        whereClause += ' AND r.audit_state = ?'
+        params.push(auditState)
+      }
     }
 
     const countSql = `
-      SELECT COUNT(*) as total
-      FROM extract_rule r
-      LEFT JOIN project p ON r.project_id = p.id
+      SELECT COUNT(DISTINCT p.id) as total
+      FROM project p
+      LEFT JOIN extract_rule r ON p.id = r.project_id AND (r.event_type = 1 OR r.event_type IS NULL)
       ${whereClause}
     `
     const [countRows] = await pool.query<RowDataPacket[]>(countSql, params)
@@ -126,26 +134,27 @@ router.get('/extractRule/page', async (req, res) => {
 
     const listSql = `
       SELECT 
-        CAST(r.id AS CHAR) as id,
+        CAST(COALESCE(r.id, p.id) AS CHAR) as id,
         CAST(r.id AS CHAR) as ruleId,
-        CAST(r.project_id AS CHAR) as projectId,
+        CAST(p.id AS CHAR) as projectId,
         p.project_no as projectNo,
         p.project_name as projectName,
         p.evaluation_room as evaluationRoom,
         p.link_man as linkMan,
         p.link_phone as linkPhone,
+        DATE_FORMAT(COALESCE(p.bid_evaluation_time, p.bid_open_time), '%Y-%m-%d %H:%i:%s') as bidEvaluationTime,
         DATE_FORMAT(p.bid_open_time, '%Y-%m-%d %H:%i:%s') as bidOpenTime,
-        r.event_type as eventType,
-        r.audit_state as auditState,
-        r.extract_state as extractState,
+        COALESCE(r.event_type, 1) as eventType,
+        COALESCE(r.audit_state, -1) as auditState,
+        COALESCE(r.extract_state, 0) as extractState,
         r.extracting_state as extractingState,
         DATE_FORMAT(r.start_extract_time, '%Y-%m-%d %H:%i:%s') as startExtractTime,
         DATE_FORMAT(r.complete_extract_time, '%Y-%m-%d %H:%i:%s') as completeExtractTime,
-        DATE_FORMAT(r.insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
-      FROM extract_rule r
-      LEFT JOIN project p ON r.project_id = p.id
+        DATE_FORMAT(COALESCE(r.insert_time, p.insert_time), '%Y-%m-%d %H:%i:%s') as insertTime
+      FROM project p
+      LEFT JOIN extract_rule r ON p.id = r.project_id AND (r.event_type = 1 OR r.event_type IS NULL)
       ${whereClause}
-      ORDER BY r.insert_time DESC
+      ORDER BY COALESCE(r.insert_time, p.insert_time) DESC
       LIMIT ? OFFSET ?
     `
     const [rows] = await pool.query<RowDataPacket[]>(listSql, [...params, ps, offset])

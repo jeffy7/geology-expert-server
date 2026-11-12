@@ -33,7 +33,7 @@ router.get('/list', async (req, res) => {
       `SELECT COUNT(*) as total FROM biz_project ${whereClause}`,
       params
     )
-    const total = countRows[0].total
+    const total = Number(countRows[0].total || 0)
 
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT 
@@ -184,18 +184,19 @@ router.post('/save', async (req, res) => {
 // 4. 保存回避专家穿梭框设置 POST /etbApi/project/saveAvoidExperts
 router.post('/saveAvoidExperts', async (req, res) => {
   try {
-    const { projectId, avoidExpertIds = [] } = req.body
-    if (!projectId) {
+    const targetProjectId = req.body.projectId || req.body.ruleId || req.body.id
+    const { avoidExpertIds = [] } = req.body
+    if (!targetProjectId) {
       res.status(400).json(errorResponse('项目ID必填', 400))
       return
     }
 
     // 先删除已有的回避设置
-    await pool.query('DELETE FROM biz_project_avoid_expert WHERE project_id = ?', [projectId])
+    await pool.query('DELETE FROM biz_project_avoid_expert WHERE project_id = ?', [targetProjectId])
 
     // 重新写入
     if (avoidExpertIds.length > 0) {
-      const values = avoidExpertIds.map((eid: number) => [projectId, eid])
+      const values = avoidExpertIds.map((eid: any) => [targetProjectId, eid])
       await pool.query('INSERT INTO biz_project_avoid_expert (project_id, expert_id) VALUES ?', [values])
     }
 

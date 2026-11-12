@@ -1,6 +1,8 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import path from 'path'
+import fs from 'fs'
 import { testDbConnection } from './config/db'
 import authRoutes from './routes/auth'
 import projectRoutes from './routes/project'
@@ -8,6 +10,7 @@ import expertRoutes from './routes/expert'
 import expertSystemRoutes from './routes/expertSystem'
 import extractRuleRoutes from './routes/extractRule'
 import dictToolsRoutes from './routes/dictTools'
+import expertNoticeRoutes from './routes/expertNotice'
 import { successResponse, errorResponse } from './types'
 
 dotenv.config()
@@ -19,6 +22,13 @@ const PORT = Number(process.env.PORT) || 8080
 app.use(cors())
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+
+// 静态文件目录 (支持上传文件本地访问与下载)
+const uploadDir = path.join(__dirname, '../uploads')
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true })
+}
+app.use('/uploads', express.static(uploadDir))
 
 // 统一日志记录
 app.use((req, _res, next) => {
@@ -42,12 +52,13 @@ app.use('/etbApi/etbuser', authRoutes)
 app.use('/etbApi/expert-system', expertSystemRoutes)
 app.use('/etbApi/expert-system', extractRuleRoutes)
 app.use('/etbApi/expert-system', dictToolsRoutes)
+app.use('/etbApi/expert-system/expert-notice', expertNoticeRoutes)
 app.use('/etbApi/brace', extractRuleRoutes)
 app.use('/etbApi/brace', dictToolsRoutes)
 app.use('/etbApi/iot', dictToolsRoutes)
 app.use('/etbApi/project', projectRoutes)
 app.use('/etbApi/expert', expertRoutes)
-app.use('/etbApi/expert-notice', expertRoutes)
+app.use('/etbApi/expert-notice', expertNoticeRoutes)
 
 // 404 处理
 app.use((req, res) => {

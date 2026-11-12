@@ -5,8 +5,9 @@ import { JWT_SECRET, authenticateToken } from '../middleware/auth'
 
 const router = Router()
 
-// 系统四大核心角色预置档案
+// 系统四大核心角色预置档案 + admin 超级管理员
 export const SYSTEM_ROLES: Record<string, { roleId: string; roleName: string; realName: string; department: string }> = {
+  admin: { roleId: 'IdentityRole_Admin', roleName: '超级管理员', realName: '超级管理员', department: '地调院数字化综合管理中心' },
   lxr: { roleId: 'IdentityRole_33', roleName: '立项人', realName: '李立项', department: '自治区矿产资源申报处' },
   sck: { roleId: 'IdentityRole_34', roleName: '审查科', realName: '王审核', department: '地调院法规审查科' },
   pszx: { roleId: 'IdentityRole_35', roleName: '评审中心', realName: '赵调度', department: '矿产资源储量评审中心' },
@@ -129,44 +130,69 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
         children: [
           {
             id: 31,
-            name: 'ExtractList',
-            path: 'extract/list',
-            component: 'extract/list',
-            meta: { title: '抽取管理' }
+            name: 'ExtractManage',
+            path: '/expertExtract/extract',
+            redirect: '/expertExtract/extract/list',
+            meta: { title: '抽取管理' },
+            children: [
+              {
+                id: 311,
+                name: 'ExtractList',
+                path: 'list',
+                component: 'extract/list',
+                meta: { title: '列表' }
+              }
+            ]
           },
           {
             id: 32,
-            name: 'PreExtractList',
-            path: 'preExtract/list',
-            component: 'extract/preList',
-            meta: { title: '专家预抽取管理' }
+            name: 'ExtractionApplication',
+            path: '/extractionApplication',
+            component: 'extract/list',
+            meta: { title: '抽取申请管理' }
           },
           {
             id: 33,
+            name: 'PreExtractManage',
+            path: '/expertExtract/preExtract',
+            redirect: '/expertExtract/preExtract/list',
+            meta: { title: '专家预抽取管理' },
+            children: [
+              {
+                id: 331,
+                name: 'PreExtractList',
+                path: 'list',
+                component: 'extract/preList',
+                meta: { title: '列表' }
+              }
+            ]
+          },
+          {
+            id: 34,
             name: 'PreExtractPreview',
             path: 'preExtract/preview',
             component: 'extract/prePreview',
             meta: { title: '预查条件与回避设置', hidden: true }
           },
           {
-            id: 34,
+            id: 35,
             name: 'ExtractDetail',
             path: 'extract/detail',
             component: 'extract/detail',
-            meta: { title: '专家抽取与查看', hidden: true }
-          },
-          {
-            id: 35,
-            name: 'ExtractExecute',
-            path: 'extract/extract',
-            component: 'extract/detail',
-            meta: { title: '专家抽取执行', hidden: true }
+            meta: { title: '查看', hidden: true }
           },
           {
             id: 36,
+            name: 'ExtractExecute',
+            path: 'extract/extract',
+            component: 'extract/extract',
+            meta: { title: '抽取列表', hidden: true }
+          },
+          {
+            id: 37,
             name: 'ExtractApplication',
             path: 'extract/application',
-            component: 'extract/detail',
+            component: 'extract/application',
             meta: { title: '抽取申请', hidden: true }
           }
         ]
@@ -204,6 +230,13 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             path: 'jurySelection',
             component: 'supervision/jurySelection',
             meta: { title: '评委抽取审批' }
+          },
+          {
+            id: 42,
+            name: 'AuditAndCheck',
+            path: '/auditAndCheck',
+            component: 'supervision/auditAndCheck',
+            meta: { title: '审核查看', hidden: true }
           }
         ]
       }
@@ -245,6 +278,13 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             path: '/expertExtract/supplement/detail',
             component: 'extract/supplementDetail',
             meta: { title: '项目补抽详情', hidden: true }
+          },
+          {
+            id: 315,
+            name: 'ExtractExecute',
+            path: '/expertExtract/extract/extract',
+            component: 'extract/detail',
+            meta: { title: '专家抽取执行', hidden: true }
           }
         ]
       },
@@ -252,15 +292,22 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
         id: 32,
         name: 'ExtractionAndApproval',
         path: '/supervision',
-        redirect: '/jurySelection',
+        redirect: '/supervision/jurySelection',
         meta: { title: '抽取审批管理', icon: 'Checked' },
         children: [
           {
             id: 321,
             name: 'JurySelection',
-            path: '/jurySelection',
+            path: 'jurySelection',
             component: 'supervision/jurySelection',
             meta: { title: '评委抽取审批' }
+          },
+          {
+            id: 322,
+            name: 'AuditAndCheck',
+            path: '/auditAndCheck',
+            component: 'supervision/auditAndCheck',
+            meta: { title: '审核查看', hidden: true }
           }
         ]
       }
@@ -344,6 +391,27 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             path: '/changeApproval/view',
             component: 'expert/changeView',
             meta: { title: '信息变更查看', hidden: true }
+          },
+          {
+            id: 63,
+            name: 'InfoManagementView',
+            path: '/infoManagement/view',
+            component: 'expert/infoView',
+            meta: { title: '专家信息查看', hidden: true }
+          },
+          {
+            id: 64,
+            name: 'InfoManagementEdit',
+            path: '/infoManagement/edit',
+            component: 'expert/infoEdit',
+            meta: { title: '专家信息编辑', hidden: true }
+          },
+          {
+            id: 62,
+            name: 'AuditVacate',
+            path: '/auditVacate',
+            component: 'expert/auditVacate',
+            meta: { title: '请假审核', hidden: true }
           }
         ]
       },
@@ -393,6 +461,134 @@ router.get('/identity/identityRoleMenuList', (req, res) => {
             component: 'tool/smsSending',
             meta: { title: '短信群发' }
           }
+        ]
+      }
+    )
+  } else if (identityRole === 'IdentityRole_Admin') {
+    // 超级管理员 (admin) - 拥有系统全部模块的全景菜单
+    menus.push(
+      // 1. 项目管理
+      {
+        id: 2,
+        name: 'ProjectManage',
+        path: '/projectManage',
+        redirect: '/projectManage/list',
+        meta: { title: '项目管理', icon: 'FolderOpened' },
+        children: [
+          { id: 21, name: 'ProjectList', path: 'list', component: 'project/list', meta: { title: '项目列表' } },
+          { id: 22, name: 'ProjectEdit', path: 'edit', component: 'project/edit', meta: { title: '项目申报录入', hidden: true } },
+          { id: 23, name: 'ProjectDetail', path: 'detail', component: 'project/detail', meta: { title: '项目详情查看', hidden: true } }
+        ]
+      },
+      // 2. 专家抽取管理
+      {
+        id: 3,
+        name: 'ExpertExtract',
+        path: '/expertExtract',
+        redirect: '/expertExtract/extract/list',
+        meta: { title: '专家抽取管理', icon: 'UserFilled' },
+        children: [
+          {
+            id: 31,
+            name: 'ExtractManage',
+            path: '/expertExtract/extract',
+            redirect: '/expertExtract/extract/list',
+            meta: { title: '抽取管理' },
+            children: [{ id: 311, name: 'ExtractList', path: 'list', component: 'extract/list', meta: { title: '列表' } }]
+          },
+          { id: 32, name: 'ExtractionApplication', path: '/extractionApplication', component: 'extract/list', meta: { title: '抽取申请管理' } },
+          {
+            id: 33,
+            name: 'PreExtractManage',
+            path: '/expertExtract/preExtract',
+            redirect: '/expertExtract/preExtract/list',
+            meta: { title: '专家预抽取管理' },
+            children: [{ id: 331, name: 'PreExtractList', path: 'list', component: 'extract/preList', meta: { title: '列表' } }]
+          },
+          { id: 34, name: 'PreExtractPreview', path: 'preExtract/preview', component: 'extract/prePreview', meta: { title: '预查条件与回避设置', hidden: true } },
+          { id: 35, name: 'ExtractDetail', path: 'extract/detail', component: 'extract/detail', meta: { title: '查看', hidden: true } },
+          { id: 36, name: 'ExtractExecute', path: 'extract/extract', component: 'extract/extract', meta: { title: '抽取列表', hidden: true } },
+          { id: 37, name: 'ExtractApplication', path: 'extract/application', component: 'extract/application', meta: { title: '抽取申请', hidden: true } }
+        ]
+      },
+      // 3. 抽取审批管理
+      {
+        id: 4,
+        name: 'Supervision',
+        path: '/supervision',
+        redirect: '/supervision/jurySelection',
+        meta: { title: '抽取审批管理', icon: 'Checked' },
+        children: [
+          { id: 41, name: 'JurySelection', path: 'jurySelection', component: 'supervision/jurySelection', meta: { title: '评委抽取审批' } },
+          { id: 42, name: 'AuditAndCheck', path: '/auditAndCheck', component: 'supervision/auditAndCheck', meta: { title: '审核查看', hidden: true } }
+        ]
+      },
+      // 4. 专家抽取记录与补抽
+      {
+        id: 31,
+        name: 'ExpertExtractionRecord',
+        path: '/expertExtractionRecord',
+        redirect: '/expertExtract/supplement/list',
+        meta: { title: '专家抽取记录', icon: 'Document' },
+        children: [
+          { id: 312, name: 'SupplementList', path: '/expertExtract/supplement/list', component: 'extract/supplementList', meta: { title: '项目补抽' } },
+          { id: 314, name: 'SupplementDetail', path: '/expertExtract/supplement/detail', component: 'extract/supplementDetail', meta: { title: '项目补抽详情', hidden: true } }
+        ]
+      },
+      // 5. 专家库管理
+      {
+        id: 50,
+        name: 'ExpertDatabaseManagement',
+        path: '/expertDatabaseManagement',
+        redirect: '/infoManagement/list',
+        meta: { title: '专家库管理', icon: 'Management' },
+        children: [
+          { id: 51, name: 'ChangeApprovalList', path: '/changeApproval/list', component: 'expert/changeList', meta: { title: '专家信息变更审批' } },
+          { id: 52, name: 'ExpertInfoList', path: '/infoManagement/list', component: 'expert/list', meta: { title: '专家库信息管理' } },
+          { id: 53, name: 'VacateList', path: '/vacate/list', component: 'expert/vacate', meta: { title: '专家请假管理' } },
+          { id: 54, name: 'ProfessionalManagement', path: '/professionalManagement', component: 'expert/professionalManagement', meta: { title: '专家专业管理' } },
+          { id: 55, name: 'ExpertTitleManagement', path: '/expertTItleManagement', component: 'expert/titleManagement', meta: { title: '专家职称管理' } },
+          { id: 56, name: 'ExpertExpertise', path: '/expertExpertise', component: 'expert/expertiseManagement', meta: { title: '专家所学专业管理' } },
+          { id: 57, name: 'ExpertEducation', path: '/expertEducation', component: 'expert/educationManagement', meta: { title: '专家学历管理' } },
+          { id: 58, name: 'ScoringSituation', path: '/infoManagement/scoringSituation', component: 'expert/scoring', meta: { title: '计分情况', hidden: true } },
+          { id: 59, name: 'ExpertViolation', path: '/infoManagement/expertViolation', component: 'expert/violation', meta: { title: '专家违规情况', hidden: true } },
+          { id: 60, name: 'ChangeApprovalView', path: '/changeApproval/view', component: 'expert/changeView', meta: { title: '信息变更查看', hidden: true } },
+          { id: 63, name: 'InfoManagementView', path: '/infoManagement/view', component: 'expert/infoView', meta: { title: '专家信息查看', hidden: true } },
+          { id: 64, name: 'InfoManagementEdit', path: '/infoManagement/edit', component: 'expert/infoEdit', meta: { title: '专家信息编辑', hidden: true } },
+          { id: 62, name: 'AuditVacate', path: '/auditVacate', component: 'expert/auditVacate', meta: { title: '请假审核', hidden: true } }
+        ]
+      },
+      // 6. 评价与考核
+      {
+        id: 70,
+        name: 'EvaluationAndAssessment',
+        path: '/evaluationAndAssessment',
+        redirect: '/evaluate',
+        meta: { title: '评价与考核', icon: 'DocumentChecked' },
+        children: [
+          { id: 71, name: 'EvaluationByJudges', path: '/evaluate', component: 'evaluation/evaluationByJudges', meta: { title: '评委评价' } }
+        ]
+      },
+      // 7. 项目字典管理
+      {
+        id: 80,
+        name: 'ProjectDictionaries',
+        path: '/projectDictionaries',
+        redirect: '/dictionariesView',
+        meta: { title: '项目字典管理', icon: 'Collection' },
+        children: [
+          { id: 81, name: 'DictionariesView', path: '/dictionariesView', component: 'dict/dictionariesView', meta: { title: '项目字典' } }
+        ]
+      },
+      // 8. 系统工具
+      {
+        id: 90,
+        name: 'SystemTools',
+        path: '/systemTools',
+        redirect: '/SMSSending',
+        meta: { title: '系统工具', icon: 'Tools' },
+        children: [
+          { id: 91, name: 'SMSSending', path: '/SMSSending', component: 'tool/smsSending', meta: { title: '短信群发' } }
         ]
       }
     )

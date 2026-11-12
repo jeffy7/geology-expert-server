@@ -347,11 +347,11 @@ router.post('/extractRule/save', async (req, res) => {
 
     const effectiveRuleId = String(ruleId || Date.now())
 
-    // 1. 确保 extract_rule 存在，更新为草稿状态 audit_state = 0
+    // 1. 确保 extract_rule 存在，更新为草稿状态 audit_state = -1 (未提交)
     await pool.query(
       `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
-       VALUES (?, ?, 1, 0, 0, NOW())
-       ON DUPLICATE KEY UPDATE audit_state = 0, last_update_time = NOW()`,
+       VALUES (?, ?, 1, -1, 0, NOW())
+       ON DUPLICATE KEY UPDATE audit_state = -1, last_update_time = NOW()`,
       [effectiveRuleId, projectId]
     )
 
@@ -432,15 +432,15 @@ router.post('/extractRule/save', async (req, res) => {
 
     await pool.query(
       `INSERT INTO extract_rule_snapshot (project_id, rule_id, event_type, num, rule_snapshot, audit_state, create_time)
-       VALUES (?, ?, 1, '1', ?, 0, NOW())
-       ON DUPLICATE KEY UPDATE rule_snapshot = ?, audit_state = 0`,
+       VALUES (?, ?, 1, '1', ?, -1, NOW())
+       ON DUPLICATE KEY UPDATE rule_snapshot = ?, audit_state = -1`,
       [projectId, effectiveRuleId, JSON.stringify(snapshotData), JSON.stringify(snapshotData)]
     )
 
     res.json(successResponse({
       ruleId: effectiveRuleId,
       projectId,
-      auditState: 0
+      auditState: -1
     }, '抽取申请草稿暂存成功！'))
   } catch (error: any) {
     console.error('暂存草稿失败:', error)
@@ -512,11 +512,11 @@ router.post('/extractRule/submitAudit', async (req, res) => {
       }
     }
 
-    // 2. 更新 extract_rule 表，设置 audit_state = 1 (待审核/审核中)
+    // 2. 更新 extract_rule 表，设置 audit_state = 0 (待审批)
     await pool.query(
       `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
-       VALUES (?, ?, 1, 1, 0, NOW())
-       ON DUPLICATE KEY UPDATE audit_state = 1, extract_state = 0, last_update_time = NOW()`,
+       VALUES (?, ?, 1, 0, 0, NOW())
+       ON DUPLICATE KEY UPDATE audit_state = 0, extract_state = 0, last_update_time = NOW()`,
       [effectiveRuleId, projectId]
     )
 
@@ -594,8 +594,8 @@ router.post('/extractRule/submitAudit', async (req, res) => {
 
     await pool.query(
       `INSERT INTO extract_rule_snapshot (project_id, rule_id, event_type, num, rule_snapshot, audit_state, create_time)
-       VALUES (?, ?, 1, '1', ?, 1, NOW())
-       ON DUPLICATE KEY UPDATE rule_snapshot = ?, audit_state = 1`,
+       VALUES (?, ?, 1, '1', ?, 0, NOW())
+       ON DUPLICATE KEY UPDATE rule_snapshot = ?, audit_state = 0`,
       [projectId, effectiveRuleId, JSON.stringify(ruleSnapshot), JSON.stringify(ruleSnapshot)]
     )
 
@@ -610,7 +610,7 @@ router.post('/extractRule/submitAudit', async (req, res) => {
     res.json(successResponse({
       ruleId: effectiveRuleId,
       projectId,
-      auditState: 1
+      auditState: 0
     }, '抽取申请已成功送审审查科！'))
   } catch (error: any) {
     console.error('提交送审失败:', error)
@@ -1519,16 +1519,23 @@ router.get('/extractRuleAudit/page', async (req, res) => {
       whereClause += ' AND p.project_name LIKE ?'
       params.push(`%${pName}%`)
     }
-    if (auditState !== undefined && auditState !== '') {
+    // 原生系统状态机映射：1-待审批(audit_state=0)；2-已审批(audit_state IN (1, 2))
+    if (String(auditState) === '1') {
+      whereClause += ' AND r.audit_state = 0'
+    } else if (String(auditState) === '2') {
+      whereClause += ' AND r.audit_state IN (1, 2)'
+    } else if (auditState !== undefined && auditState !== '') {
       whereClause += ' AND r.audit_state = ?'
       params.push(auditState)
+    } else {
+      whereClause += ' AND r.audit_state >= 0'
     }
 
     const [countRows] = await pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) as total FROM extract_rule r LEFT JOIN project p ON r.project_id = p.id ${whereClause}`,
       params
     )
-    const total = countRows[0]?.total || 0
+    const total = Number(countRows[0]?.total || 0)
 
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT 
@@ -1542,6 +1549,7 @@ router.get('/extractRuleAudit/page', async (req, res) => {
         p.link_man as linkMan,
         p.link_phone as linkPhone,
         DATE_FORMAT(p.bid_open_time, '%Y-%m-%d %H:%i:%s') as bidOpenTime,
+        DATE_FORMAT(COALESCE(p.bid_evaluation_time, p.bid_open_time), '%Y-%m-%d %H:%i:%s') as bidEvaluationTime,
         r.audit_state as auditState,
         r.extract_state as extractState,
         DATE_FORMAT(r.insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
@@ -1607,35 +1615,38 @@ router.get('/extractRuleAudit/getInfo', async (req, res) => {
 
 router.post('/extractRuleAudit/audit', async (req, res) => {
   try {
-    const { applyId, ruleId, auditState, auditComment, comment } = req.body
+    const { applyId, ruleId, auditState, auditCode, auditRemark, auditComment, comment } = req.body
     const targetId = ruleId || applyId
     if (!targetId) {
       return res.status(400).json(errorResponse('缺少待审核规则ID'))
     }
 
-    const state = Number(auditState) // 2 审核通过, 3 审核驳回
-    const memo = auditComment || comment || (state === 2 ? '同意抽取申请' : '驳回抽取申请')
+    // 前端审核操作：1-审核通过, 2-驳回
+    const rawState = Number(auditState ?? auditCode)
+    const isPass = rawState === 1
+    const finalState = isPass ? 1 : 2
+    const memo = auditRemark || auditComment || comment || (isPass ? '同意抽取申请' : '驳回抽取申请')
 
-    // 1. 更新 extract_rule 表
+    // 1. 更新 extract_rule 表 (1: 审批通过, 2: 审批未通过)
     await pool.query(
       `UPDATE extract_rule SET audit_state = ?, last_update_time = NOW() WHERE id = ?`,
-      [state, targetId]
+      [finalState, targetId]
     )
 
     // 2. 更新 extract_rule_snapshot 表
     await pool.query(
       `UPDATE extract_rule_snapshot SET audit_state = ? WHERE rule_id = ?`,
-      [state, targetId]
+      [finalState, targetId]
     )
 
-    // 3. 记录审批流水 audit_record
+    // 3. 记录审批流水 audit_record (audit_result: 1通过, 0不通过)
     await pool.query(
       `INSERT INTO audit_record (id, business_id, task_name, audit_result, audit_comment, audit_user_name, audit_time)
        VALUES (?, ?, '审查科科长审批', ?, ?, '审查科审批员', NOW())`,
-      [Date.now().toString(), targetId, state === 2 ? 1 : 0, memo]
+      [Date.now().toString(), targetId, isPass ? 1 : 0, memo]
     )
 
-    res.json(successResponse(null, state === 2 ? '抽取申请审批已通过！' : '抽取申请已被驳回！'))
+    res.json(successResponse(null, isPass ? '抽取申请审批已通过！' : '抽取申请已被驳回！'))
   } catch (error: any) {
     res.status(500).json(errorResponse(error.message))
   }

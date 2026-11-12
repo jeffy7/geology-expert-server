@@ -442,7 +442,18 @@ router.post('/file/upload', upload.single('file'), async (req, res) => {
         fileName = req.file.originalname
       }
       fileSize = req.file.size
-      fileSuffix = req.file.mimetype || 'application/octet-stream'
+      const ext = fileName.includes('.') ? fileName.split('.').pop()!.toLowerCase() : 'docx'
+      if (ext === 'pdf') {
+        fileSuffix = 'application/pdf'
+      } else if (ext === 'docx' || ext === 'doc') {
+        fileSuffix = 'application/msword'
+      } else if (ext === 'xlsx' || ext === 'xls') {
+        fileSuffix = 'application/vnd.ms-excel'
+      } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
+        fileSuffix = `image/${ext === 'jpg' ? 'jpeg' : ext}`
+      } else {
+        fileSuffix = (req.file.mimetype || ext).slice(0, 60)
+      }
       fileUrl = `/uploads/${req.file.filename}`
       newFileId = req.file.filename.split('_')[0] || newFileId
     } else {

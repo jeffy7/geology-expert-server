@@ -204,7 +204,8 @@ router.post('/braceRank/toggleStatus', async (req, res) => {
   try {
     const { id, status } = req.body
     if (!id) return res.status(400).json(errorResponse('缺少职称ID'))
-    await pool.query('UPDATE brace_rank SET rank_status = ?, last_update_time = NOW() WHERE CAST(id AS CHAR) = ?', [status ? 1 : 0, String(id)])
+    const rankStatus = (status === true || status === 1 || status === '1') ? 0 : 1
+    await pool.query('UPDATE brace_rank SET rank_status = ?, last_update_time = NOW() WHERE CAST(id AS CHAR) = ?', [rankStatus, String(id)])
     res.json(successResponse({ success: true }, '状态更新成功'))
   } catch (error: any) {
     res.status(500).json(errorResponse('状态切换失败: ' + error.message))
@@ -225,15 +226,15 @@ router.post('/braceRank/delete', async (req, res) => {
 
 // 3. 专家所学专业字典树 GET /etbApi/brace/braceDict/learn_major/tree
 let dynamicLearnMajorTree = [
-  { id: '19', name: '金属矿产地质与勘查技术', grade: 0, majorStatus: 0, children: [] },
-  { id: '20', name: '资源勘查工程', grade: 0, majorStatus: 0, children: [] },
-  { id: '21', name: '矿山工程', grade: 0, majorStatus: 0, children: [] },
-  { id: '22', name: '矿业工程', grade: 0, majorStatus: 0, children: [] },
-  { id: '23', name: '地质工程', grade: 0, majorStatus: 0, children: [] },
-  { id: '24', name: '矿产资源工程', grade: 0, majorStatus: 0, children: [] },
-  { id: '25', name: '矿业经济与管理', grade: 0, majorStatus: 0, children: [] },
-  { id: '26', name: '地质学', grade: 0, majorStatus: 0, children: [] },
-  { id: '27', name: '矿物加工工程', grade: 0, majorStatus: 0, children: [] }
+  { id: '19', name: '金属矿产地质与勘查技术', grade: 0, majorStatus: 1, children: [] },
+  { id: '20', name: '资源勘查工程', grade: 0, majorStatus: 1, children: [] },
+  { id: '21', name: '矿山工程', grade: 0, majorStatus: 1, children: [] },
+  { id: '22', name: '矿业工程', grade: 0, majorStatus: 1, children: [] },
+  { id: '23', name: '地质工程', grade: 0, majorStatus: 1, children: [] },
+  { id: '24', name: '矿产资源工程', grade: 0, majorStatus: 1, children: [] },
+  { id: '25', name: '矿业经济与管理', grade: 0, majorStatus: 1, children: [] },
+  { id: '26', name: '地质学', grade: 0, majorStatus: 1, children: [] },
+  { id: '27', name: '矿物加工工程', grade: 0, majorStatus: 1, children: [] }
 ]
 
 router.get('/braceDict/learn_major/tree', (req, res) => {
@@ -302,7 +303,7 @@ router.post('/braceDict/learn_major/toggleStatus', (req, res) => {
   const toggleNode = (nodes: any[]): boolean => {
     for (const n of nodes) {
       if (n.id === String(id)) {
-        n.majorStatus = status ? 0 : 1
+        n.majorStatus = (status === true || status === 1 || status === '1') ? 1 : 0
         return true
       }
       if (n.children && toggleNode(n.children)) return true
@@ -331,11 +332,11 @@ router.post('/braceDict/learn_major/delete', (req, res) => {
 
 // 4. 专家学历字典列表 GET /etbApi/brace/braceDict/edu/list
 let dynamicEduList = [
-  { id: '14', name: '本科', status: 0, sort: 1 },
-  { id: '15', name: '硕士研究生', status: 0, sort: 2 },
-  { id: '16', name: '博士研究生', status: 0, sort: 3 },
-  { id: '17', name: '大专', status: 0, sort: 4 },
-  { id: '18', name: '中专及其他', status: 0, sort: 5 }
+  { id: '14', name: '本科', status: 1, sort: 1 },
+  { id: '15', name: '硕士研究生', status: 1, sort: 2 },
+  { id: '16', name: '博士研究生', status: 1, sort: 3 },
+  { id: '17', name: '大专', status: 1, sort: 4 },
+  { id: '18', name: '中专及其他', status: 1, sort: 5 }
 ]
 
 router.get('/braceDict/edu/list', (_req, res) => {
@@ -372,6 +373,17 @@ router.post('/braceDict/edu/delete', (req, res) => {
   if (!id) return res.status(400).json(errorResponse('缺少学历ID'))
   dynamicEduList = dynamicEduList.filter(e => e.id !== String(id))
   res.json(successResponse({ success: true }, '学历删除成功'))
+})
+
+// 4.3 切换学历启用/禁用 POST /etbApi/brace/braceDict/edu/toggleStatus
+router.post('/braceDict/edu/toggleStatus', (req, res) => {
+  const { id, status } = req.body
+  if (!id) return res.status(400).json(errorResponse('缺少学历ID'))
+  const item = dynamicEduList.find(e => e.id === String(id))
+  if (item) {
+    item.status = (status === true || status === 1 || status === '1') ? 1 : 0
+  }
+  res.json(successResponse({ success: true }, '学历状态更新成功'))
 })
 
 // 4.9 原生项目字典列表查询 GET /etbApi/brace/braceDict/list?parentId=xxx (严格对齐抓包 HAR)

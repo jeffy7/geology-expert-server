@@ -731,8 +731,12 @@ const handleCoreExtract = async (req: any, res: any) => {
       const leaderParams = [...baseParams]
 
       if (leaderMajor) {
-        leaderWhere += ` AND (b.study_major_name LIKE ? OR b.id IN (SELECT DISTINCT ei_id FROM expert_info_major WHERE major_name LIKE ?))`
-        leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`)
+        leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+          SELECT DISTINCT m.ei_id FROM expert_info_major m 
+          LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
+          WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
+        ))`
+        leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`)
       }
 
       let [leaderCandidates] = await pool.query<RowDataPacket[]>(
@@ -795,8 +799,12 @@ const handleCoreExtract = async (req: any, res: any) => {
         }
 
         if (mMajor) {
-          mWhere += ` AND (b.study_major_name LIKE ? OR b.id IN (SELECT DISTINCT ei_id FROM expert_info_major WHERE major_name LIKE ?))`
-          mParams.push(`%${mMajor}%`, `%${mMajor}%`)
+          mWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+            SELECT DISTINCT m.ei_id FROM expert_info_major m 
+            LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
+            WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
+          ))`
+          mParams.push(`%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`)
         }
 
         let [crewCandidates] = await pool.query<RowDataPacket[]>(

@@ -375,17 +375,19 @@ router.post('/expert-system-project', async (req, res) => {
     )
 
     // 3. 初始化评委评价记录 assess_record
+    const assessId = String(Date.now() + 2) + Math.floor(1000 + Math.random() * 9000)
     await pool.query(
-      `INSERT INTO assess_record (project_id, evaluate_status, insert_time)
-       VALUES (?, 0, NOW())`,
-      [newId]
+      `INSERT INTO assess_record (id, project_id, evaluate_status, insert_time)
+       VALUES (?, ?, 0, NOW())`,
+      [assessId, newId]
     )
 
     // 4. 初始化项目操作人记录 project_operator
+    const opId = String(Date.now() + 3) + Math.floor(1000 + Math.random() * 9000)
     await pool.query(
-      `INSERT INTO project_operator (project_id, operator_time, operator_id, operator_name, incident)
-       VALUES (?, NOW(), 1, '立项人', 0)`,
-      [newId]
+      `INSERT INTO project_operator (id, project_id, operator_time, operator_id, operator_name, incident)
+       VALUES (?, ?, NOW(), 1, '立项人', 0)`,
+      [opId, newId]
     )
 
     res.json(successResponse({ id: newId, projectNo }, '操作成功!'))

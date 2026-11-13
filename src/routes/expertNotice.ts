@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { pool } from '../config/db'
 import { successResponse, errorResponse } from '../types'
 import { sendTtsVoice, sendCodeVoice, getVmsConfigSummary, printVmsProperties, vmsConfig } from '../services/vms'
+import { voiceBoxService } from '../services/voiceBox'
 import type { RowDataPacket, ResultSetHeader } from 'mysql2'
 
 const router = Router()
@@ -14,6 +15,11 @@ router.get('/config', (_req, res) => {
 // 2. 打印原生 VmsProperties GET /etbApi/expert-notice/print-vms-properties
 router.get('/print-vms-properties', (_req, res) => {
   res.json(successResponse(printVmsProperties()))
+})
+
+// 2.1 语音盒子实时连接状态 GET /etbApi/expert-notice/voicebox-status
+router.get('/voicebox-status', (_req, res) => {
+  res.json(successResponse(voiceBoxService.getStatus(), '语音盒子连接状态查询成功'))
 })
 
 // 3. 启动专家抽取外呼通知 GET /etbApi/expert-notice/start
@@ -66,7 +72,12 @@ router.get('/start', async (req, res) => {
         project.evaluation_room || '专家评审会议室'
       ]
 
-      const callResult = await sendTtsVoice(r.ei_phone, templateParams)
+      let callResult: any
+      if (vmsConfig.channel === 'voicebox') {
+        callResult = await voiceBoxService.dial(r.ei_phone, { extractRuleResultId: r.id })
+      } else {
+        callResult = await sendTtsVoice(r.ei_phone, templateParams)
+      }
       const callId = callResult.callId || `call-${Date.now()}-${r.id}`
 
       // 插入/更新 notice_expert_callback 表

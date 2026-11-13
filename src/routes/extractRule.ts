@@ -1737,13 +1737,80 @@ router.get('/extractRuleAudit/getInfo', async (req, res) => {
         manual: '手动指定'
       }
 
-      const leaderMajor = parsed.leaderMajor || parsed.leaderMajorNames || ''
-      const leaderArea = parsed.leaderArea ? (Array.isArray(parsed.leaderArea) ? parsed.leaderArea.join('、') : String(parsed.leaderArea)) : '不限地区'
-      const leaderNum = parsed.leaderNum !== undefined ? Number(parsed.leaderNum) : (leaderMajor ? 1 : 0)
+      // 地区编码转中文映射
+      const areaCodeToNameMap: Record<string, string> = {
+        'A': '内蒙古自治区',
+        'A-A01': '呼和浩特市', 'A01': '呼和浩特市',
+        'A-A02': '包头市', 'A02': '包头市',
+        'A-A03': '乌海市', 'A03': '乌海市',
+        'A-A04': '赤峰市', 'A04': '赤峰市',
+        'A-A05': '通辽市', 'A05': '通辽市',
+        'A-A06': '鄂尔多斯市', 'A06': '鄂尔多斯市',
+        'A-A07': '呼伦贝尔市', 'A07': '呼伦贝尔市',
+        'A-A08': '巴彦淖尔市', 'A08': '巴彦淖尔市',
+        'A-A09': '乌兰察布市', 'A09': '乌兰察布市',
+        'A-A10': '兴安盟', 'A10': '兴安盟',
+        'A-A11': '锡林郭勒盟', 'A11': '锡林郭勒盟',
+        'A-A12': '阿拉善盟', 'A12': '阿拉善盟'
+      }
+
+      // 专业编码转中文映射
+      const majorCodeToNameMap: Record<string, string> = {
+        'A': '专家专业',
+        'A-A01': '地质矿产（煤炭）', 'A01': '地质矿产（煤炭）',
+        'A-A02': '地质矿产（煤层气）', 'A02': '地质矿产（煤层气）',
+        'A-A03': '地质矿产（金属）', 'A03': '地质矿产（金属）',
+        'A-A04': '地质矿产（非金属）', 'A04': '地质矿产（非金属）',
+        'A-A05': '地质矿产（煤炭资源储量核算）', 'A05': '地质矿产（煤炭资源储量核算）',
+        'A-A06': '地质矿产（金属资源储量核算）', 'A06': '地质矿产（金属资源储量核算）',
+        'A-A07': '地质矿产（非金属资源储量核算）', 'A07': '地质矿产（非金属资源储量核算）',
+        'A-A08': '地质矿产（地质统计学资源储量核算）', 'A08': '地质矿产（地质统计学资源储量核算）',
+        'A-A09': '测量', 'A09': '测量',
+        'A-A10': '采矿（露天）', 'A10': '采矿（露天）',
+        'A-A11': '采矿（地下）', 'A11': '采矿（地下）',
+        'A-A12': '选矿', 'A12': '选矿',
+        'A-A13': '水文地质', 'A13': '水文地质',
+        'A-A14': '工程地质', 'A14': '工程地质',
+        'A-A15': '环境地质', 'A15': '环境地质',
+        'A-A16': '地质经济', 'A16': '地质经济',
+        'A-A17': '综合经济', 'A17': '综合经济',
+        'A-A18': '生态修复', 'A18': '生态修复',
+        'A-A19': '法律', 'A19': '法律',
+        'A-A20': '安全工程', 'A20': '安全工程',
+        'A-A25': '地质矿产（金属非金属资源储量核算）', 'A25': '地质矿产（金属非金属资源储量核算）',
+        'A-A26': '油气矿产（地质）', 'A26': '油气矿产（地质）',
+        'A-A27': '地质矿产（经济）', 'A27': '地质矿产（经济）'
+      }
+
+      try {
+        const [mRows] = await pool.query<RowDataPacket[]>('SELECT major_name, major_code, major_path FROM brace_major')
+        mRows.forEach((r: any) => {
+          if (r.major_path) majorCodeToNameMap[r.major_path] = r.major_name
+          if (r.major_code) majorCodeToNameMap[r.major_code] = r.major_name
+        })
+      } catch (_) {}
+
+      const formatMajorText = (val: any) => {
+        if (!val) return '-'
+        const str = String(val)
+        return majorCodeToNameMap[str] || str
+      }
+
+      const formatAreaText = (val: any) => {
+        if (!val || val === '不限地区') return '不限地区'
+        const list = Array.isArray(val) ? val : String(val).split(/[、,，]/).filter(Boolean)
+        if (list.length === 0) return '不限地区'
+        return list.map(item => areaCodeToNameMap[item] || item).join('、')
+      }
+
+      const rawLeaderMajor = parsed.leaderMajor || parsed.leaderMajorNames || ''
+      const leaderMajor = formatMajorText(rawLeaderMajor)
+      const leaderArea = formatAreaText(parsed.leaderArea)
+      const leaderNum = parsed.leaderNum !== undefined ? Number(parsed.leaderNum) : (rawLeaderMajor ? 1 : 0)
 
       const memberInfos = Array.isArray(parsed.memberMajors) ? parsed.memberMajors.map((m: any) => ({
-        extractMajorNames: m.major || m.extractMajorNames || m.majorName || '-',
-        extractAreaNames: m.areas ? (Array.isArray(m.areas) ? m.areas.join('、') : String(m.areas)) : (m.extractAreaNames || '不限地区'),
+        extractMajorNames: formatMajorText(m.major || m.extractMajorNames || m.majorName),
+        extractAreaNames: formatAreaText(m.areas || m.area || m.extractAreaNames),
         extractNum: m.num !== undefined ? Number(m.num) : (m.extractNum !== undefined ? Number(m.extractNum) : 1)
       })) : []
 
@@ -1752,9 +1819,30 @@ router.get('/extractRuleAudit/getInfo', async (req, res) => {
       const extractCondition = `${avoidDays} 天内被抽中且同意参与的专家不再被抽中；1个月内被抽中且同意参与超过 ${maxExtractCount} 次的专家不能被抽中`
 
       const avoidUnits = Array.isArray(parsed.avoidUnits) ? parsed.avoidUnits : (parsed.avoidCompanies ? (Array.isArray(parsed.avoidCompanies) ? parsed.avoidCompanies : [parsed.avoidCompanies]) : [])
-      const avoidExperts = Array.isArray(parsed.avoidExperts) && parsed.avoidExperts.length > 0
-        ? parsed.avoidExperts.map((e: any) => e.name || e.eiName || String(e)).join('、')
-        : (Array.isArray(parsed.avoidExpertIds) && parsed.avoidExpertIds.length > 0 ? parsed.avoidExpertIds.join('、') : '无')
+      
+      let avoidExperts = '无'
+      if (Array.isArray(parsed.avoidExperts) && parsed.avoidExperts.length > 0) {
+        avoidExperts = parsed.avoidExperts.map((e: any) => {
+          if (typeof e === 'object') {
+            return `${e.name || e.eiName || ''}${e.entName ? ' (' + e.entName + ')' : ''}`
+          }
+          return String(e)
+        }).join('、')
+      } else if (Array.isArray(parsed.avoidExpertIds) && parsed.avoidExpertIds.length > 0) {
+        try {
+          const [expRows] = await pool.query<RowDataPacket[]>(
+            `SELECT ei_name, ent_name FROM expert_info_base WHERE id IN (?)`,
+            [parsed.avoidExpertIds]
+          )
+          if (expRows.length > 0) {
+            avoidExperts = expRows.map(r => `${r.ei_name}${r.ent_name ? ' (' + r.ent_name + ')' : ''}`).join('、')
+          } else {
+            avoidExperts = parsed.avoidExpertIds.join('、')
+          }
+        } catch (_) {
+          avoidExperts = parsed.avoidExpertIds.join('、')
+        }
+      }
 
       return res.json(successResponse({
         id: String(snap.id),

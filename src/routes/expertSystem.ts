@@ -191,9 +191,49 @@ router.get('/expert-system-project/:id', async (req, res) => {
     )
     const ruleItem = ruleRows[0] || null
 
+    const censorMap: Record<string, string> = { '29': '会议审查', '30': '函审' }
+    const scaleMap: Record<string, string> = {
+      '1777534261857419266': '小型/露天',
+      '31': '中型/露天',
+      '1752594044705738753': '大型及以上/露天',
+      '1777534357860843522': '小型/井工',
+      '1777534581882814465': '中型/井工',
+      '1777534627139354626': '大型及以上/井工',
+      '1777534787143663618': '小型',
+      '1777534819766960130': '中型',
+      '1777534850620260353': '大型及以上',
+      '1960616139477790721': '其他'
+    }
+    const mineralMap: Record<string, string> = {
+      '33': '煤矿',
+      '1752594044705738753': '金属',
+      '1777533589338521602': '非金属',
+      '1777534019334373377': '矿泉水',
+      '1777533950753308674': '地热',
+      '1777534138448412673': '煤层气'
+    }
+    const reviewCategoryMap: Record<string, string> = {
+      '35': '矿产资源储量报告评审',
+      '36': '开发利用方案审查',
+      '37': '非法采矿、破坏性采矿造成矿产资源破坏的价值鉴定',
+      '38': '压覆报告评审',
+      '39': '压覆查询',
+      '40': '储量统计质量监控',
+      '41': '其他',
+      '1960615227459940353': '勘查方案评审',
+      '1960615434952159234': '开采方案评审'
+    }
+
+    const expOrg = ext.experimentOrgName || ext.testOrgName || ''
+    const compOrg = ext.compileUnitName || ext.inputOrgName || ''
+
     res.json(successResponse({
       ...r,
       id: String(r.id),
+      censorName: censorMap[r.censor] || r.censorName || (r.censor === '29' ? '会议审查' : (r.censor === '30' ? '函审' : r.censor)) || '-',
+      scaleName: scaleMap[r.scale] || r.scaleName || r.scale || '-',
+      masterMineralsName: mineralMap[r.masterMinerals] || r.masterMineralsName || r.masterMinerals || '-',
+      reviewCategoryName: reviewCategoryMap[r.reviewCategory] || r.reviewCategoryName || r.reviewCategory || '-',
       avoidExpertIds,
       rule: ruleItem ? {
         totalExpertCount: ruleItem.total_expert_count,
@@ -202,11 +242,12 @@ router.get('/expert-system-project/:id', async (req, res) => {
         leaderMajorId: ruleItem.leader_major_id,
         memberRules: ruleItem.member_rules_json ? JSON.parse(ruleItem.member_rules_json) : []
       } : null,
-      inputOrgName: ext.inputOrgName || '',
-      compileUnitName: ext.compileUnitName || '',
+      inputOrgName: compOrg,
+      compileUnitName: compOrg,
       docRoom: ext.docRoom || '',
       applyReasonName: ext.applyReasonName || '',
-      experimentOrgName: ext.experimentOrgName || '',
+      experimentOrgName: expOrg,
+      testOrgName: expOrg,
       joinUserList: ext.joinUserList || []
     }))
   } catch (error: any) {
@@ -1413,8 +1454,8 @@ router.post('/expertInfoBase/getManualListByParam', async (req, res) => {
     const params: any[] = []
 
     if (eiNameOrIdNumber) {
-      whereClause += ' AND (e.ei_name LIKE ? OR e.id_number LIKE ?)'
-      params.push(`%${eiNameOrIdNumber}%`, `%${eiNameOrIdNumber}%`)
+      whereClause += ' AND (e.ei_name LIKE ? OR e.id_number LIKE ? OR e.ent_name LIKE ?)'
+      params.push(`%${eiNameOrIdNumber}%`, `%${eiNameOrIdNumber}%`, `%${eiNameOrIdNumber}%`)
     }
 
     const [rows]: any = await pool.query(

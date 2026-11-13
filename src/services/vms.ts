@@ -2,6 +2,7 @@
 import * as tencentcloud from 'tencentcloud-sdk-nodejs'
 import http from 'http'
 import https from 'https'
+import { voiceBoxService } from './voiceBox'
 
 const VmsClient = tencentcloud.vms.v20200902.Client
 
@@ -108,67 +109,15 @@ export async function sendTtsVoice(
   // 1. 若配置为语音盒子 (voicebox)
   if (vmsConfig.channel === 'voicebox') {
     const callId = `vb-${Date.now()}-${Math.floor(Math.random() * 10000)}`
-    console.log(`[VoiceBox-IoT] 正在通过语音盒子呼叫专家: ${cleanNumber}, 语音设备: ${vmsConfig.voiceBox.host}:${vmsConfig.voiceBox.port}, 参数:`, templateParams)
+    console.log(`[VoiceBox-IoT] 正在通过语音盒子呼叫专家: ${cleanNumber}, 语音设备: ${vmsConfig.voiceBox.host}:${vmsConfig.voiceBox.port}`)
 
-    // 若开启 mock 或未连上真实语音盒子硬件，返回仿真调用
-    if (vmsConfig.mockVms || !vmsConfig.voiceBox.enabled) {
-      return {
-        success: true,
-        isMock: true,
-        callId,
-        message: '语音盒子外呼指令已成功发送（仿真）'
-      }
-    }
-
-    try {
-      // 尝试向语音盒子发送 HTTP 指令
-      return await new Promise<VmsCallResult>((resolve) => {
-        const postData = JSON.stringify({
-          callId,
-          calledNumber: cleanNumber,
-          templateId: vmsConfig.templateId,
-          voiceFileUri: vmsConfig.voiceBox.voiceFileUri,
-          params: templateParams,
-          agreeKey: vmsConfig.agreeKey,
-          rejectKey: vmsConfig.rejectKey
-        })
-        const req = http.request({
-          hostname: vmsConfig.voiceBox.host,
-          port: vmsConfig.voiceBox.port,
-          path: '/api/voice/call',
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData)
-          },
-          timeout: 3000
-        }, (res) => {
-          resolve({
-            success: true,
-            isMock: false,
-            callId,
-            message: '语音盒子外呼指令已下发至硬件外设'
-          })
-        })
-        req.on('error', () => {
-          // 容错降级
-          resolve({
-            success: true,
-            isMock: true,
-            callId,
-            message: '语音盒子连接超时，已降级完成指令模拟'
-          })
-        })
-        req.write(postData)
-        req.end()
-      })
-    } catch (err: any) {
-      return {
-        success: true,
-        isMock: true,
-        callId,
-        message: `语音盒子模拟外呼: ${err.message}`
-      }
+    // 优先调用硬件 WebSocket 服务进行真机外呼
+    const callResult = await voiceBoxService.dial(cleanNumber, { callId })
+    return {
+      success: callResult.success,
+      isMock: !callResult.success,
+      callId: callResult.callId,
+      message: callResult.message
     }
   }
 

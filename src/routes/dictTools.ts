@@ -121,12 +121,11 @@ router.get('/braceRank/page', async (req, res) => {
         CAST(id AS CHAR) as id,
         rank_name as rankName,
         IFNULL(rank_status, 0) as rankStatus,
-        IFNULL(rank_weight, 3) as rankWeight,
         insert_person_name as insertPersonName,
         DATE_FORMAT(insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
        FROM brace_rank
        ${where}
-       ORDER BY rank_weight DESC, id ASC
+       ORDER BY id ASC
        LIMIT ? OFFSET ?`,
       [...params, ps, offset]
     )

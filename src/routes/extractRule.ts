@@ -738,7 +738,7 @@ const handleCoreExtract = async (req: any, res: any) => {
       let [leaderCandidates] = await pool.query<RowDataPacket[]>(
         `SELECT b.* FROM expert_info_base b
          WHERE ${leaderWhere}
-         ORDER BY (CASE WHEN b.leader = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
+         ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
         [...leaderParams, leaderNum]
       )
 
@@ -747,7 +747,7 @@ const handleCoreExtract = async (req: any, res: any) => {
         const [fallbackLeaders] = await pool.query<RowDataPacket[]>(
           `SELECT b.* FROM expert_info_base b
            WHERE ${baseWhere}
-           ORDER BY (CASE WHEN b.leader = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
+           ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
           [...baseParams, leaderNum]
         )
         if (fallbackLeaders.length >= leaderNum) {
@@ -956,7 +956,7 @@ router.post('/extractActive/replaceExtract', async (req, res) => {
       `SELECT b.* FROM expert_info_base b
        WHERE (b.if_stop = 0 OR b.if_stop IS NULL) AND (b.if_leave = 0 OR b.if_leave IS NULL)
          AND b.id != ?
-         ${isLeader ? 'AND (b.leader = 1 OR b.leader IS NULL)' : ''}
+         ${isLeader ? 'AND (COALESCE(b.leader, 2) = 1 OR b.leader IS NULL)' : ''}
          AND CAST(b.id AS CHAR) NOT IN (
            SELECT DISTINCT CAST(ei_id AS CHAR) FROM extract_rule_result WHERE project_id = ? AND (avoidance_flag IS NULL OR avoidance_flag = 0)
          )
@@ -1190,6 +1190,86 @@ router.post('/extractPreRule/save', async (req, res) => {
   return (router as any).handle({ ...req, method: 'POST', url: '/extractRule/save' } as any, res, () => {})
 })
 
+router.post('/extractPreRule/extract', async (req, res) => {
+  try {
+    const { ruleId, projectId, totalExpertNum = 5, leaderMajor, leaderArea, leaderNum = 1, memberMajors = [], avoidUnits = [], avoidExpertIds = [] } = req.body
+    const targetProjectId = projectId || ruleId
+
+    // 1. 检查组长候选池
+    let leaderWhere = `WHERE (if_stop = 0 OR if_stop IS NULL) AND (if_leave = 0 OR if_leave IS NULL)`
+    const leaderParams: any[] = []
+    if (avoidUnits && avoidUnits.length > 0) {
+      leaderWhere += ` AND ent_name NOT IN (${avoidUnits.map(() => '?').join(',')})`
+      leaderParams.push(...avoidUnits)
+    }
+    if (avoidExpertIds && avoidExpertIds.length > 0) {
+      leaderWhere += ` AND CAST(id AS CHAR) NOT IN (${avoidExpertIds.map(() => '?').join(',')})`
+      leaderParams.push(...avoidExpertIds.map(String))
+    }
+
+    let leaderCount = 0
+    if (Number(leaderNum) > 0) {
+      const [lRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) as count FROM expert_info_base ${leaderWhere}`,
+        leaderParams
+      )
+      leaderCount = Number(lRows[0]?.count || 0)
+      if (leaderCount < Number(leaderNum)) {
+        return res.json({
+          code: -1,
+          msg: `【${leaderMajor || '组长专业'}】专家库可用数量不足（仅 ${leaderCount} 人），不满足拟抽取组长数（${leaderNum} 人）`
+        })
+      }
+    }
+
+    // 2. 检查组员候选池
+    let totalMemberNeeded = 0
+    let memberAvailable = 0
+    const [mRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM expert_info_base ${leaderWhere}`,
+      leaderParams
+    )
+    memberAvailable = Number(mRows[0]?.count || 0)
+
+    if (Array.isArray(memberMajors) && memberMajors.length > 0) {
+      for (const m of memberMajors) {
+        totalMemberNeeded += Number(m.num || 1)
+      }
+    } else {
+      totalMemberNeeded = Number(totalExpertNum) - Number(leaderNum)
+    }
+
+    if (memberAvailable < totalMemberNeeded) {
+      return res.json({
+        code: -1,
+        msg: `专家库可用专家总数不足（仅 ${memberAvailable} 人），不满足拟抽取组员总数（${totalMemberNeeded} 人）`
+      })
+    }
+
+    // 3. 满足条件：更新 extract_rule 预查完成状态
+    if (ruleId || targetProjectId) {
+      await pool.query(
+        `UPDATE extract_rule SET extract_state = 1 WHERE id = ? OR project_id = ?`,
+        [ruleId || targetProjectId, targetProjectId || ruleId]
+      )
+    }
+
+    res.json({
+      code: 0,
+      msg: '所有抽取条件数据满足抽取专家数',
+      data: {
+        leaderAvailable: leaderCount,
+        leaderNeeded: leaderNum,
+        memberAvailable,
+        memberNeeded: totalMemberNeeded,
+        isSatisfied: true
+      }
+    })
+  } catch (error: any) {
+    res.json({ code: -1, msg: '预查计算异常: ' + error.message })
+  }
+})
+
 router.post('/extractPreRule/previewMatch', async (req, res) => {
   try {
     const { avoidCompanies = [], avoidExpertIds = [] } = req.body
@@ -1343,13 +1423,13 @@ router.get('/extractActive/getRuleResultByPIdAndRuleId', async (req, res) => {
         r.ei_majors as eiMajors,
         r.ei_majors as eiMajorCodes,
         DATE_FORMAT(r.extract_time, '%Y-%m-%d %H:%i:%s') as extractTime,
-        IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as IF(condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%', 1, 2) as leader,
+        IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader,
         r.notice_state as noticeState,
         r.participate_state as participateState,
-        r.avoidance_flag as avoidanceFlag
+        COALESCE(r.avoidance_flag, 0) as avoidanceFlag
        FROM extract_rule_result r
        WHERE (r.project_id = ? OR r.rule_id = ?)
-       ORDER BY r.leader ASC, r.id ASC`,
+       ORDER BY leader ASC, r.id ASC`,
       [pId || ruleId, ruleId || pId]
     )
 
@@ -1636,17 +1716,56 @@ router.get('/extractRuleAudit/getInfo', async (req, res) => {
 
     if (snapshots && snapshots.length > 0) {
       const snap = snapshots[0]
-      let parsed = {}
+      let parsed: any = {}
       if (snap.rule_snapshot) {
         try {
           parsed = typeof snap.rule_snapshot === 'string' ? JSON.parse(snap.rule_snapshot) : snap.rule_snapshot
         } catch (_) {}
       }
+
+      const methodMap: Record<string, string> = {
+        random: '随机抽取',
+        preferred: '择优抽取',
+        manual: '手动指定'
+      }
+
+      const leaderMajor = parsed.leaderMajor || parsed.leaderMajorNames || ''
+      const leaderArea = parsed.leaderArea ? (Array.isArray(parsed.leaderArea) ? parsed.leaderArea.join('、') : String(parsed.leaderArea)) : '不限地区'
+      const leaderNum = parsed.leaderNum !== undefined ? Number(parsed.leaderNum) : (leaderMajor ? 1 : 0)
+
+      const memberInfos = Array.isArray(parsed.memberMajors) ? parsed.memberMajors.map((m: any) => ({
+        extractMajorNames: m.major || m.extractMajorNames || m.majorName || '-',
+        extractAreaNames: m.areas ? (Array.isArray(m.areas) ? m.areas.join('、') : String(m.areas)) : (m.extractAreaNames || '不限地区'),
+        extractNum: m.num !== undefined ? Number(m.num) : (m.extractNum !== undefined ? Number(m.extractNum) : 1)
+      })) : []
+
+      const avoidDays = parsed.avoidDays || 30
+      const maxExtractCount = parsed.maxExtractCount || 3
+      const extractCondition = `${avoidDays} 天内被抽中且同意参与的专家不再被抽中；1个月内被抽中且同意参与超过 ${maxExtractCount} 次的专家不能被抽中`
+
+      const avoidUnits = Array.isArray(parsed.avoidUnits) ? parsed.avoidUnits : (parsed.avoidCompanies ? (Array.isArray(parsed.avoidCompanies) ? parsed.avoidCompanies : [parsed.avoidCompanies]) : [])
+      const avoidExperts = Array.isArray(parsed.avoidExperts) && parsed.avoidExperts.length > 0
+        ? parsed.avoidExperts.map((e: any) => e.name || e.eiName || String(e)).join('、')
+        : (Array.isArray(parsed.avoidExpertIds) && parsed.avoidExpertIds.length > 0 ? parsed.avoidExpertIds.join('、') : '无')
+
       return res.json(successResponse({
         id: String(snap.id),
         ruleId: String(snap.rule_id),
         projectId: String(snap.project_id),
         auditState: snap.audit_state,
+        totalExpertNum: parsed.totalExpertNum || (leaderNum + memberInfos.reduce((s: number, m: any) => s + m.extractNum, 0)),
+        extractMethodText: methodMap[parsed.extractMethod] || parsed.extractMethod || '随机抽取',
+        extractMethod: parsed.extractMethod || 'random',
+        leaderInfo: leaderMajor ? {
+          extractMajorNames: leaderMajor,
+          extractAreaNames: leaderArea,
+          extractNum: leaderNum
+        } : null,
+        memberInfos,
+        extractCondition,
+        avoidExperts,
+        avoidCompanies: avoidUnits,
+        avoidUnits,
         ruleSnapshot: JSON.stringify(parsed),
         parsed
       }))

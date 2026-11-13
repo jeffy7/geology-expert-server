@@ -120,7 +120,7 @@ router.get('/braceRank/page', async (req, res) => {
       `SELECT 
         CAST(id AS CHAR) as id,
         rank_name as rankName,
-        IFNULL(rank_status, 0) as rankStatus,
+        IFNULL(rank_status, 1) as rankStatus,
         insert_person_name as insertPersonName,
         DATE_FORMAT(insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
        FROM brace_rank
@@ -148,10 +148,10 @@ router.get('/braceRank/list', async (req, res) => {
       `SELECT 
         CAST(id AS CHAR) as id,
         rank_name as rankName,
-        IFNULL(rank_status, 0) as rankStatus,
+        IFNULL(rank_status, 1) as rankStatus,
         IFNULL(rank_weight, 3) as rankWeight
        FROM brace_rank
-       WHERE rank_status = 0
+       WHERE rank_status = 1
        ORDER BY rank_weight DESC, id ASC`
     )
 
@@ -177,7 +177,7 @@ router.get('/braceRank/list', async (req, res) => {
 // 2.1 保存专家职称 POST /etbApi/expert-system/braceRank/save
 router.post('/braceRank/save', async (req, res) => {
   try {
-    const { id, rankName, rankWeight = 3, rankStatus = 0 } = req.body
+    const { id, rankName, rankWeight = 3, rankStatus = 1 } = req.body
     if (!rankName) return res.status(400).json(errorResponse('职称名称不能为空'))
 
     if (id) {
@@ -204,7 +204,7 @@ router.post('/braceRank/toggleStatus', async (req, res) => {
   try {
     const { id, status } = req.body
     if (!id) return res.status(400).json(errorResponse('缺少职称ID'))
-    const rankStatus = (status === true || status === 1 || status === '1') ? 0 : 1
+    const rankStatus = (status === true || status === 1 || status === '1') ? 1 : 0
     await pool.query('UPDATE brace_rank SET rank_status = ?, last_update_time = NOW() WHERE CAST(id AS CHAR) = ?', [rankStatus, String(id)])
     res.json(successResponse({ success: true }, '状态更新成功'))
   } catch (error: any) {

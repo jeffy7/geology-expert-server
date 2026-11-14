@@ -165,8 +165,11 @@ router.get('/expert-system-project/:id', async (req, res) => {
         review_category as reviewCategory,
         ext_info as extInfo
        FROM project 
-       WHERE CAST(id AS CHAR) = ? OR project_no = ?`,
-      [String(id), String(id)]
+       WHERE CAST(id AS CHAR) = ? 
+          OR project_no = ?
+          OR id = (SELECT project_id FROM extract_rule WHERE CAST(id AS CHAR) = ? LIMIT 1)
+          OR id = (SELECT project_id FROM extract_rule_apply_snapshot WHERE CAST(rule_id AS CHAR) = ? LIMIT 1)`,
+      [String(id), String(id), String(id), String(id)]
     )
 
     if (rows.length === 0) {
@@ -2038,17 +2041,33 @@ router.post('/expertInfoBase/chooseList', async (req, res) => {
 
     for (const item of majorAndAreaParamList) {
       const { majorCodeList = [], areaCodeList = [] } = item
-      let whereClause = "(e.del_flag = '0' OR e.del_flag IS NULL)"
+      let whereClause = "(e.del_flag = '0' OR e.del_flag IS NULL) AND (e.if_stop = 0 OR e.if_stop IS NULL) AND (e.if_leave = 0 OR e.if_leave IS NULL) AND (e.if_black = 0 OR e.if_black IS NULL)"
       const params: any[] = []
 
-      if (majorCodeList.length > 0 && majorCodeList[0]) {
-        whereClause += ' AND (m.major_code LIKE ? OR m.major_code IS NOT NULL)'
-        params.push(`%${majorCodeList[0]}%`)
+      // 组长筛选：组长需满足 leader = 1
+      if (ifLeader === true || ifLeader === 1 || ifLeader === '1' || ifLeader === 'true') {
+        whereClause += ' AND e.leader = 1'
       }
 
+      // 专业筛选：支持 major_code (如 A01/A-A01)、专业名称及所学专业匹配
+      if (majorCodeList.length > 0 && majorCodeList[0]) {
+        const mKey = String(majorCodeList[0]).trim()
+        whereClause += ' AND (m.major_code LIKE ? OR m.major_name LIKE ? OR e.study_major_name LIKE ?)'
+        params.push(`%${mKey}%`, `%${mKey}%`, `%${mKey}%`)
+      }
+
+      // 地区筛选：支持单选或多选盟市 (如 A-A01 或 呼和浩特市)
       if (areaCodeList.length > 0 && areaCodeList[0]) {
-        whereClause += ' AND (e.area_code LIKE ? OR e.area_text LIKE ?)'
-        params.push(`%${areaCodeList[0]}%`, `%${areaCodeList[0]}%`)
+        const areaOrs: string[] = []
+        for (const aKey of areaCodeList) {
+          if (!aKey) continue
+          const cleanA = String(aKey).trim()
+          areaOrs.push('(e.area_code LIKE ? OR e.area_text LIKE ?)')
+          params.push(`%${cleanA}%`, `%${cleanA}%`)
+        }
+        if (areaOrs.length > 0) {
+          whereClause += ` AND (${areaOrs.join(' OR ')})`
+        }
       }
 
       const [rows]: any = await pool.query(

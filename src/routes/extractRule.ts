@@ -745,8 +745,7 @@ const handleCoreExtract = async (req: any, res: any) => {
         if (leaderMajor) {
           leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
             SELECT DISTINCT m.ei_id FROM expert_info_major m 
-            LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
-            WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
+            WHERE m.major_name LIKE ? OR m.major_code LIKE ?
           ))`
           leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`)
         }
@@ -832,8 +831,7 @@ const handleCoreExtract = async (req: any, res: any) => {
           if (mMajor) {
             mWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
               SELECT DISTINCT m.ei_id FROM expert_info_major m 
-              LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
-              WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
+              WHERE m.major_name LIKE ? OR m.major_code LIKE ?
             ))`
             mParams.push(`%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`)
           }
@@ -889,10 +887,30 @@ const handleCoreExtract = async (req: any, res: any) => {
 
     // 5. 更新规则与项目状态为已抽取/待通知 (组长待通知 20, 组员待通知 201)
     const nextExtractingState = groupId === '1' ? 20 : groupId === '2' ? 201 : 20
-    await pool.query(
-      `UPDATE extract_rule SET extract_state = 1, extracting_state = ?, start_extract_time = NOW(), last_update_time = NOW() WHERE id = ?`,
-      [nextExtractingState, ruleId]
-    )
+    try {
+      await pool.query(
+        `UPDATE extract_rule SET extract_state = 1, extracting_state = ?, start_extract_time = NOW(), last_update_time = NOW() WHERE id = ?`,
+        [nextExtractingState, ruleId]
+      )
+    } catch (updateErr: any) {
+      if (updateErr.message && updateErr.message.includes('Out of range') && updateErr.message.includes('extracting_state')) {
+        console.warn('⚠️ extracting_state 超出范围，自动修复字段类型为 INT 并重试...')
+        try {
+          await pool.query(`ALTER TABLE extract_rule MODIFY COLUMN extracting_state INT DEFAULT 10 COMMENT '抽取中具体状态枚举'`)
+          await pool.query(
+            `UPDATE extract_rule SET extract_state = 1, extracting_state = ?, start_extract_time = NOW(), last_update_time = NOW() WHERE id = ?`,
+            [nextExtractingState, ruleId]
+          )
+        } catch (retryErr) {
+          await pool.query(
+            `UPDATE extract_rule SET extract_state = 1, start_extract_time = NOW(), last_update_time = NOW() WHERE id = ?`,
+            [ruleId]
+          )
+        }
+      } else {
+        throw updateErr
+      }
+    }
     await pool.query(
       `UPDATE project SET extract_state = 1 WHERE id = ?`,
       [pId]

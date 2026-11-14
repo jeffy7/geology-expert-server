@@ -1069,19 +1069,44 @@ router.post('/extractActive/avoidance', async (req, res) => {
       return res.status(400).json(errorResponse('缺少必须的项目ID或回避专家列表'))
     }
 
+    // 1. 检查是否存在待完成的补抽规则
+    const [existingSext] = await pool.query<RowDataPacket[]>(
+      `SELECT CAST(id AS CHAR) as id FROM extract_rule WHERE project_id = ? AND event_type = 2 AND extract_state = 0 LIMIT 1`,
+      [projectId]
+    )
+
+    let sextRuleId = existingSext[0]?.id
+    if (!sextRuleId) {
+      sextRuleId = Date.now().toString()
+      await pool.query(
+        `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
+         VALUES (?, ?, 2, 1, 0, NOW())`,
+        [sextRuleId, projectId]
+      )
+      // 补抽快照 (视同审核通过 audit_state = 1)
+      await pool.query(
+        `INSERT INTO extract_rule_apply_snapshot (id, project_id, rule_id, event_type, audit_state, insert_time)
+         VALUES (?, ?, ?, 2, 1, NOW())`,
+        [Date.now().toString(), projectId, sextRuleId]
+      ).catch(() => {})
+    }
+
+    // 2. 更新被回避专家的抽取记录，并关联 sext_rule_id
     for (const q of querys) {
       const eiId = q.eiId || q.id
+      const reason = q.reason || q.avoidanceRemark || '项目方申请回避'
       await pool.query(
         `UPDATE extract_rule_result
-         SET avoidance_flag = 1, participate_state = 2, avoidance_remark = ?, avoidance_time = NOW()
-         WHERE project_id = ? AND ei_id = ?`,
-        [q.avoidanceRemark || '项目方申请回避', projectId, eiId]
+         SET avoidance_flag = 1, participate_state = 2, avoidance_remark = ?, avoidance_time = NOW(), sext_rule_id = ?
+         WHERE (project_id = ? OR rule_id = ?) AND ei_id = ?`,
+        [reason, sextRuleId, projectId, projectId, eiId]
       )
       await pool.query(`UPDATE expert_info_base SET if_lock = 0 WHERE id = ?`, [eiId]).catch(() => {})
     }
 
-    res.json(successResponse(null, '专家回避成功，已初始化补抽规则'))
+    res.json(successResponse({ sextRuleId }, '专家回避登记成功，已初始化项目补抽！'))
   } catch (error: any) {
+    console.error('专家回避登记失败:', error)
     res.status(500).json(errorResponse(error.message))
   }
 })
@@ -1992,56 +2017,6 @@ router.post('/extractRuleAudit/audit', async (req, res) => {
     res.json(successResponse(null, isPass ? '抽取申请审批已通过！' : '抽取申请已被驳回！'))
   } catch (error: any) {
     res.status(500).json(errorResponse(error.message))
-  }
-})
-
-// ==========================================
-// 12. 专家现场/事后回避 POST /extractActive/avoidance
-// ==========================================
-router.post('/extractActive/avoidance', async (req, res) => {
-  try {
-    const { projectId, querys = [] } = req.body
-    if (!projectId) {
-      return res.status(400).json(errorResponse('项目ID必填'))
-    }
-
-    if (!Array.isArray(querys) || querys.length === 0) {
-      return res.status(400).json(errorResponse('回避专家列表不能为空'))
-    }
-
-    // 1. 批量标记回避状态
-    for (const q of querys) {
-      const eiId = q.eiId || q.id
-      const reason = q.reason || q.avoidanceRemark || '立项人设置回避'
-      if (eiId) {
-        await pool.query(
-          `UPDATE extract_rule_result 
-           SET avoidance_flag = 1, avoidance_time = NOW(), avoidance_remark = ?
-           WHERE (project_id = ? OR rule_id = ?) AND ei_id = ?`,
-          [reason, projectId, projectId, eiId]
-        )
-      }
-    }
-
-    // 2. 检查是否有未完成的补抽，若无则初始化补抽待办
-    const [existingSext] = await pool.query<RowDataPacket[]>(
-      `SELECT id FROM extract_rule WHERE project_id = ? AND event_type = 2 AND extract_state = 0 LIMIT 1`,
-      [projectId]
-    )
-
-    if (existingSext.length === 0) {
-      const sextRuleId = Date.now().toString()
-      await pool.query(
-        `INSERT INTO extract_rule (id, project_id, event_type, audit_state, extract_state, insert_time)
-         VALUES (?, ?, 2, 1, 0, NOW())`,
-        [sextRuleId, projectId]
-      )
-    }
-
-    res.json(successResponse(null, '专家回避登记成功，已生成补抽待办！'))
-  } catch (error: any) {
-    console.error('专家回避登记失败:', error)
-    res.status(500).json(errorResponse('专家回避登记失败: ' + error.message))
   }
 })
 

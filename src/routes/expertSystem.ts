@@ -2044,31 +2044,131 @@ router.post('/expertInfoBase/chooseList', async (req, res) => {
     const { ifLeader = false, majorAndAreaParamList = [] } = req.body
     const sizeList: number[] = []
 
+    const AREA_DICT_MAP: Record<string, { shortCode: string; fullCode: string; name: string }> = {
+      'A-A01': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+      'A01': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+      '2': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+      '呼和浩特市': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+      '呼和浩特': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+
+      'A-A02': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+      'A02': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+      '3': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+      '包头市': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+      '包头': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+
+      'A-A03': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+      'A03': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+      '4': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+      '乌海市': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+      '乌海': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+
+      'A-A04': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+      'A04': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+      '5': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+      '赤峰市': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+      '赤峰': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+
+      'A-A05': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+      'A05': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+      '6': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+      '通辽市': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+      '通辽': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+
+      'A-A06': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+      'A06': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+      '7': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+      '鄂尔多斯市': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+      '鄂尔多斯': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+
+      'A-A07': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+      'A07': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+      '8': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+      '呼伦贝尔市': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+      '呼伦贝尔': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+
+      'A-A08': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+      'A08': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+      '9': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+      '巴彦淖尔市': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+      '巴彦淖尔': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+
+      'A-A09': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+      'A09': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+      '10': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+      '乌兰察布市': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+      '乌兰察布': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+
+      'A-A10': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+      'A10': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+      '11': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+      '锡林郭勒盟': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+      '锡林郭勒': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+
+      'A-A11': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+      'A11': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+      '12': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+      '兴安盟': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+
+      'A-A12': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+      'A12': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+      '13': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+      '阿拉善盟': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+      '阿拉善': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' }
+    }
+
+    const MAJOR_DICT_MAP: Record<string, { shortCode: string; fullCode: string; name: string }> = {
+      'A-A01': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+      'A01': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+      '2': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+      '地质矿产（煤炭）': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+
+      'A-A02': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+      'A02': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+      '3': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+      '地质矿产（煤层气）': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+
+      'A-A03': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
+      'A03': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
+      '4': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
+      '地质矿产（金属）': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' }
+    }
+
     for (const item of majorAndAreaParamList) {
       const { majorCodeList = [], areaCodeList = [] } = item
       let whereClause = "(e.del_flag = '0' OR e.del_flag IS NULL) AND (e.if_stop = 0 OR e.if_stop IS NULL) AND (e.if_leave = 0 OR e.if_leave IS NULL) AND (e.if_black = 0 OR e.if_black IS NULL)"
       const params: any[] = []
 
-      // 组长筛选：组长需满足 leader = 1
+      // 组长筛选：组长需满足 leader = 1；组员筛选：需满足 leader = 2 或非组长
       if (ifLeader === true || ifLeader === 1 || ifLeader === '1' || ifLeader === 'true') {
         whereClause += ' AND e.leader = 1'
+      } else if (ifLeader === false || ifLeader === 0 || ifLeader === '0' || ifLeader === 'false') {
+        whereClause += ' AND (e.leader = 2 OR e.leader = 0 OR e.leader IS NULL)'
       }
 
       // 专业筛选：支持 major_code (如 A01/A-A01)、专业名称及所学专业匹配
       if (majorCodeList.length > 0 && majorCodeList[0]) {
         const mKey = String(majorCodeList[0]).trim()
-        whereClause += ' AND (m.major_code LIKE ? OR m.major_name LIKE ? OR e.study_major_name LIKE ?)'
-        params.push(`%${mKey}%`, `%${mKey}%`, `%${mKey}%`)
+        const mInfo = MAJOR_DICT_MAP[mKey]
+        const shortMajor = mInfo?.shortCode || (mKey.includes('-') ? mKey.split('-').pop() : mKey) || mKey
+        const majorName = mInfo?.name || mKey
+
+        whereClause += ' AND (m.major_code = ? OR m.major_code = ? OR m.major_code LIKE ? OR m.major_name = ? OR m.major_name LIKE ? OR e.study_major_name LIKE ?)'
+        params.push(mKey, shortMajor, `%${shortMajor}%`, majorName, `%${majorName}%`, `%${majorName}%`)
       }
 
-      // 地区筛选：支持单选或多选盟市 (如 A-A01 或 呼和浩特市)
+      // 地区筛选：支持单选或多选盟市 (如 A-A01, A01, 呼和浩特市)
       if (areaCodeList.length > 0 && areaCodeList[0]) {
         const areaOrs: string[] = []
         for (const aKey of areaCodeList) {
           if (!aKey) continue
           const cleanA = String(aKey).trim()
-          areaOrs.push('(e.area_code LIKE ? OR e.area_text LIKE ?)')
-          params.push(`%${cleanA}%`, `%${cleanA}%`)
+          const aInfo = AREA_DICT_MAP[cleanA]
+          const shortArea = aInfo?.shortCode || (cleanA.includes('-') ? cleanA.split('-').pop() : cleanA) || cleanA
+          const cityName = aInfo?.name || cleanA
+
+          areaOrs.push('(e.area_code = ? OR e.area_code = ? OR e.area_code LIKE ? OR e.area_text = ? OR e.area_text LIKE ?)')
+          params.push(cleanA, shortArea, `%${shortArea}%`, cityName, `%${cityName}%`)
         }
         if (areaOrs.length > 0) {
           whereClause += ` AND (${areaOrs.join(' OR ')})`

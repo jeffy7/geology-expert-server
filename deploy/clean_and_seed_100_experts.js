@@ -37,9 +37,9 @@ const MAJORS = [
 
 // 职称定义
 const RANKS = [
-  { rank_name: '正高级工程师', rank_code: 1686268859800408000 },
-  { rank_name: '高级工程师', rank_code: 1686268823129608200 },
-  { rank_name: '工程师', rank_code: 1686268760089219000 }
+  { rank_name: '正高', rank_code: 1 },
+  { rank_name: '高级', rank_code: 2 },
+  { rank_name: '中级', rank_code: 3 }
 ];
 
 // 常见百家姓与名

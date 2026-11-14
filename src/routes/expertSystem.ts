@@ -1671,7 +1671,7 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
       'SELECT id, major_name, major_code, major_path FROM brace_major WHERE major_status = 0'
     )
     const [dbRanks] = await pool.query<RowDataPacket[]>(
-      'SELECT id, rank_name FROM brace_rank WHERE rank_status = 0'
+      'SELECT id, rank_name FROM brace_rank WHERE rank_status = 1 OR rank_status IS NULL OR rank_status = 0'
     )
 
     // 收集待导入的全部有效手机号，以手机号作为唯一标准在数据库中查重
@@ -1798,8 +1798,13 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
       } else {
         matchedRank = dbRanks.find(r => r.rank_name === rankText)
         if (!matchedRank) {
-          if (rankText === '正高') matchedRank = dbRanks.find(r => r.rank_name === '正高' || r.rank_name === '正高级工程师')
-          else if (rankText === '副高') matchedRank = dbRanks.find(r => r.rank_name === '高级工程师' || r.rank_name === '副高级')
+          if (['正高', '正高级', '正高级工程师'].includes(rankText)) {
+            matchedRank = dbRanks.find(r => r.rank_name === '正高' || r.rank_name === '正高级' || r.rank_name === '正高级工程师')
+          } else if (['高级', '副高', '高级工程师', '副高级'].includes(rankText)) {
+            matchedRank = dbRanks.find(r => r.rank_name === '高级' || r.rank_name === '高级工程师' || r.rank_name === '副高级')
+          } else if (['中级', '工程师', '中级工程师'].includes(rankText)) {
+            matchedRank = dbRanks.find(r => r.rank_name === '中级' || r.rank_name === '工程师')
+          }
         }
         if (!matchedRank) {
           rowErrors.push(`职称【${rankText}】未匹配系统职称字典`)

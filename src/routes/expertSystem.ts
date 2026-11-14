@@ -1671,10 +1671,25 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
       'SELECT id, rank_name FROM brace_rank WHERE rank_status = 0'
     )
 
+    // 收集待导入的全部有效手机号，以手机号作为唯一标准在数据库中查重
+    const allImportPhones = rowsToProcess
+      .map(item => (item.data['手机号'] || item.data['phone'] || '').trim())
+      .filter(p => /^1\d{10}$/.test(p))
+
+    let dbExistingPhones = new Set<string>()
+    if (allImportPhones.length > 0) {
+      const [existingPhoneRows] = await pool.query<RowDataPacket[]>(
+        'SELECT phone FROM expert_info_base WHERE phone IN (?)',
+        [allImportPhones]
+      )
+      dbExistingPhones = new Set(existingPhoneRows.map(r => String(r.phone).trim()))
+    }
+
+    const batchSeenPhones = new Set<string>()
     const failRows: { rowNum: number, errors: string[] }[] = []
     const validRows: any[] = []
 
-    // 逐行严格字典校验（未命中绝不设默认值）
+    // 逐行严格字典校验（未命中绝不设默认值）与手机号唯一标准校验
     for (const rowItem of rowsToProcess) {
       const { rowNum, data: row } = rowItem
       const rowErrors: string[] = []
@@ -1683,10 +1698,23 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
       const eiName = (row['专家姓名'] || row['eiName'] || '').trim()
       if (!eiName) rowErrors.push('专家姓名不能为空')
 
-      // 2. 手机号
+      // 2. 手机号（以手机号作为唯一标准，校验格式与重复性）
       const phone = (row['手机号'] || row['phone'] || '').trim()
-      if (!/^1\d{10}$/.test(phone)) {
-        rowErrors.push(`手机号【${phone || '空'}】格式不正确，须为11位数字`)
+      if (!phone) {
+        rowErrors.push('手机号不能为空')
+      } else if (!/^1\d{10}$/.test(phone)) {
+        rowErrors.push(`手机号【${phone}】格式不正确，须为11位数字`)
+      } else {
+        // 同批次内部查重
+        if (batchSeenPhones.has(phone)) {
+          rowErrors.push(`手机号【${phone}】重复`)
+        } else {
+          batchSeenPhones.add(phone)
+        }
+        // 数据库已存在查重
+        if (dbExistingPhones.has(phone)) {
+          rowErrors.push(`手机号【${phone}】重复`)
+        }
       }
 
       // 3. 身份证号
@@ -1857,7 +1885,7 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
         ) VALUES (
           ?, ?, ?, ?, ?, 'z123456', ?, ?, ?,
           ?, ?, ?, ?, ?, ?, ?,
-          95, '甲', 0, 0, 0, 0, 0,
+          100, '甲', 0, 0, 0, 0, 0,
           1, 2, NOW(), NOW()
         )`,
         [

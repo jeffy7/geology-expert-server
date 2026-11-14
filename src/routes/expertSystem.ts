@@ -975,7 +975,9 @@ router.get('/expertInfoAlter/:id', async (req, res) => {
     // 兜底补齐 baseInfo 关键字段
     baseInfo = {
       eiName: baseInfo.eiName || row.eiName || '-',
-      sex: baseInfo.sex ?? row.sex ?? 1,
+      sex: (baseInfo.sex !== undefined && baseInfo.sex !== null) 
+        ? (Number(baseInfo.sex) === 2 ? 2 : 1) 
+        : (Number(row.sex) === 2 ? 2 : 1),
       idNumber: baseInfo.idNumber || row.idNumber || '-',
       entName: baseInfo.entName || row.entName || '-',
       entCode: baseInfo.entCode || row.entCode || '-',
@@ -1420,7 +1422,7 @@ router.post('/expertInfoBase/update', async (req, res) => {
 
       const baseInfoSnapshot = {
         eiName: old.ei_name || '-',
-        sex: old.sex ?? 1,
+        sex: Number(old.sex) === 2 ? 2 : 1,
         idNumber: old.id_number || '-',
         entName: old.ent_name || '-',
         entCode: old.ent_code || '-',
@@ -1437,7 +1439,7 @@ router.post('/expertInfoBase/update', async (req, res) => {
 
       const afterInfoSnapshot = {
         eiName: name ?? old.ei_name,
-        sex: sex !== undefined ? Number(sex) : old.sex,
+        sex: sex !== undefined ? (Number(sex) === 2 ? 2 : 1) : (Number(old.sex) === 2 ? 2 : 1),
         idNumber: old.id_number,
         entName: entName ?? old.ent_name,
         entCode: entCode ?? old.ent_code,

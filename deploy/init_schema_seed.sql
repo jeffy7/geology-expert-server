@@ -362,6 +362,37 @@ INSERT INTO `expert_info_major` VALUES (1739475341102465026,1739475336355303424,
 UNLOCK TABLES;
 
 --
+-- Table structure for table `expert_info_alter`
+--
+
+CREATE TABLE IF NOT EXISTS `expert_info_alter` (
+  `id` bigint(20) NOT NULL COMMENT '主键ID',
+  `ei_id` bigint(20) NOT NULL COMMENT '专家id',
+  `before_change` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '变更之前的信息',
+  `after_change` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '变更之后的信息',
+  `diff_change` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '变更差异的',
+  `alert_num` int(11) DEFAULT NULL COMMENT '变更次数',
+  `alert_reason` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '变更原因',
+  `audit_state` tinyint(4) NOT NULL COMMENT '审核状态',
+  `insert_person_id` bigint(20) DEFAULT NULL COMMENT '插入操作人的唯一编码',
+  `insert_person_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '插入操作人名称',
+  `insert_time` datetime DEFAULT NULL COMMENT '插入的时间',
+  `last_update_person_id` bigint(20) DEFAULT NULL COMMENT '更新操作人的唯一编码',
+  `last_update_person` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '更新操作人名称',
+  `last_update_time` datetime DEFAULT NULL COMMENT '最后更新的时间',
+  `data_level` tinyint(1) DEFAULT NULL COMMENT '数据级别 0可删除可修改 1可修改不可删除 2不可删除不可修改',
+  `apply_state` tinyint(1) DEFAULT NULL COMMENT '审批状态 0 不通过 1 通过',
+  `apply_person_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '审批人',
+  `apply_person_id` bigint(20) DEFAULT NULL COMMENT '审批人ID',
+  `task_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '任务ID',
+  `if_need_apply` bit(1) DEFAULT NULL COMMENT '是否需要审批 0 不需要 1 需要',
+  `del_flag` bit(1) DEFAULT NULL COMMENT '逻辑删除 0 未删除 1 已删除',
+  `data_scope_dept_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '数据权限归属部门Code',
+  `data_scope_user_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '数据权限归属用户ID',
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC COMMENT='专家信息变更记录';
+
+--
 -- Table structure for table `expert_info_leave`
 --
 

@@ -825,121 +825,180 @@ router.get('/expertInfoLeave/:id', async (req, res) => {
   }
 })
 
-// 9. 专家信息变更审批分页 GET /etbApi/expert-system/expertInfoAlter/auditPage
+// 9. 专家信息变更台账分页 GET /etbApi/expert-system/expertInfoAlter/auditPage (对接真实 expert_info_alter 表)
 router.get('/expertInfoAlter/auditPage', async (req, res) => {
   try {
     const { name, auditState, current = '1', size = '10' } = req.query
     const p = Math.max(1, parseInt(current as string, 10))
     const ps = Math.max(1, parseInt(size as string, 10))
+    const offset = (p - 1) * ps
 
-    // 默认提供与录频及 HAR 1:1 的变更审批数据
-    let mockList = [
-      {
-        id: '1863756150904258562',
-        eiName: '郭智峰',
-        sex: 0,
-        idNumber: '152101196309010615',
-        entName: '退休',
-        alterReason: '已退休',
-        auditState: 1,
-        auditStateText: '已通过'
-      },
-      {
-        id: '1863756150904258563',
-        eiName: '侯建军',
-        sex: 0,
-        idNumber: '150121196303101050',
-        entName: '退休',
-        alterReason: '手机号变更',
-        auditState: 1,
-        auditStateText: '已通过'
-      }
-    ]
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
 
-    if (auditState !== undefined && auditState !== '') {
-      mockList = mockList.filter((item) => String(item.auditState) === String(auditState))
-    }
     if (name) {
-      mockList = mockList.filter((item) => item.eiName.includes(name as string))
+      whereClause += ' AND b.ei_name LIKE ?'
+      params.push(`%${name}%`)
     }
+    if (auditState !== undefined && auditState !== '' && auditState !== null) {
+      whereClause += ' AND a.audit_state = ?'
+      params.push(Number(auditState))
+    }
+
+    const [countRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as total 
+       FROM expert_info_alter a
+       LEFT JOIN expert_info_base b ON a.ei_id = b.id
+       ${whereClause}`,
+      params
+    )
+    const total = Number(countRows[0]?.total || 0)
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+         CAST(a.id AS CHAR) as id,
+         CAST(a.ei_id AS CHAR) as eiId,
+         b.ei_name as eiName,
+         b.sex,
+         b.id_number as idNumber,
+         b.ent_name as entName,
+         a.alert_reason as alterReason,
+         a.audit_state as auditState,
+         DATE_FORMAT(a.insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
+       FROM expert_info_alter a
+       LEFT JOIN expert_info_base b ON a.ei_id = b.id
+       ${whereClause}
+       ORDER BY a.insert_time DESC
+       LIMIT ?, ?`,
+      [...params, offset, ps]
+    )
+
+    const list = rows.map((r) => ({
+      id: r.id,
+      eiId: r.eiId,
+      eiName: r.eiName || '未知专家',
+      sex: r.sex ?? 1,
+      idNumber: r.idNumber || '-',
+      entName: r.entName || '-',
+      alterReason: r.alterReason || '专家信息变更',
+      auditState: r.auditState ?? 1,
+      auditStateText: r.auditState === 1 ? '已通过' : (r.auditState === 2 ? '已驳回' : '待审核'),
+      insertTime: r.insertTime
+    }))
 
     res.json(successResponse({
-      total: mockList.length,
-      list: mockList,
+      total,
+      list,
       current: p,
       size: ps
     }))
   } catch (error: any) {
-    res.status(500).json(errorResponse('获取信息变更列表失败'))
+    console.error('获取信息变更列表失败:', error)
+    res.status(500).json(errorResponse('获取信息变更列表失败: ' + error.message))
   }
 })
 
-// 9.1 专家信息变更详情 GET /etbApi/expert-system/expertInfoAlter/:id (1:1 对齐 HAR 原生数据契约)
+// 9.1 专家信息变更详情 GET /etbApi/expert-system/expertInfoAlter/:id (对接真实 expert_info_alter 表)
 router.get('/expertInfoAlter/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    const alterDataMap: Record<string, any> = {
-      '1863756150904258562': {
-        diffInfos: [
-          {
-            field: 'entName',
-            fieldName: '工作单位',
-            valueOne: '内蒙古煤勘新能源开发有限公司',
-            valueTwo: '退休'
-          }
-        ],
-        alterReason: '已退休',
-        baseInfo: {
-          majorListStr: '专家专业/地质矿产（煤炭）',
-          rankListStr: '正高',
-          fileListStr: 'null',
-          eiName: '郭智峰',
-          sex: 0,
-          idNumber: '152101196309010615',
-          entCode: '91150192MA7HCYCL18',
-          entName: '内蒙古煤勘新能源开发有限公司',
-          areaCode: '15-1501',
-          areaText: '内蒙古自治区-呼和浩特市',
-          applyWay: 3,
-          phone: '13948800631',
-          isLeader: 0,
-          isRetire: 0
-        }
-      },
-      '1863756150904258563': {
-        diffInfos: [
-          {
-            field: 'phone',
-            fieldName: '手机号',
-            valueOne: '13847190001',
-            valueTwo: '15012119630'
-          }
-        ],
-        alterReason: '手机号变更',
-        baseInfo: {
-          majorListStr: '专家专业/水工环',
-          rankListStr: '正高',
-          fileListStr: 'null',
-          eiName: '侯建军',
-          sex: 0,
-          idNumber: '150121196303101050',
-          entCode: '91150192MA7HCYCL18',
-          entName: '退休',
-          areaCode: '15-1501',
-          areaText: '内蒙古自治区-呼和浩特市',
-          applyWay: 3,
-          phone: '15012119630',
-          isLeader: 0,
-          isRetire: 1
-        }
-      }
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT 
+         CAST(a.id AS CHAR) as id,
+         CAST(a.ei_id AS CHAR) as eiId,
+         b.ei_name as eiName,
+         b.sex,
+         b.id_number as idNumber,
+         b.phone,
+         b.ent_name as entName,
+         b.ent_code as entCode,
+         b.area_text as areaText,
+         b.study_major_name as learnMajor,
+         b.degree_name as edu,
+         b.leader as isLeader,
+         b.if_retire as isRetire,
+         a.before_change as beforeChange,
+         a.after_change as afterChange,
+         a.diff_change as diffChange,
+         a.alert_reason as alterReason,
+         a.audit_state as auditState,
+         DATE_FORMAT(a.insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
+       FROM expert_info_alter a
+       LEFT JOIN expert_info_base b ON a.ei_id = b.id
+       WHERE CAST(a.id AS CHAR) = ?`,
+      [String(id)]
+    )
+
+    if (rows.length === 0) {
+      return res.status(404).json(errorResponse('未找到对应的变更记录'))
     }
 
-    const data = alterDataMap[id] || alterDataMap['1863756150904258562']
-    res.json(successResponse(data))
+    const row = rows[0]
+    let baseInfo: any = {}
+    let diffInfos: any[] = []
+
+    try {
+      if (row.beforeChange) {
+        baseInfo = JSON.parse(row.beforeChange)
+      }
+    } catch (e) {
+      baseInfo = {}
+    }
+
+    // 兜底补齐 baseInfo 关键字段
+    baseInfo = {
+      eiName: baseInfo.eiName || row.eiName || '-',
+      sex: baseInfo.sex ?? row.sex ?? 1,
+      idNumber: baseInfo.idNumber || row.idNumber || '-',
+      entName: baseInfo.entName || row.entName || '-',
+      entCode: baseInfo.entCode || row.entCode || '-',
+      areaText: baseInfo.areaText || row.areaText || '-',
+      majorListStr: baseInfo.majorListStr || '-',
+      rankListStr: baseInfo.rankListStr || '-',
+      learnMajor: baseInfo.learnMajor || row.learnMajor || '-',
+      edu: baseInfo.edu || row.edu || '-',
+      isLeader: baseInfo.isLeader ?? row.isLeader ?? 0,
+      isRetire: baseInfo.isRetire ?? row.isRetire ?? 0,
+      phone: baseInfo.phone || row.phone || '-'
+    }
+
+    try {
+      if (row.diffChange) {
+        diffInfos = JSON.parse(row.diffChange)
+      }
+    } catch (e) {
+      diffInfos = []
+    }
+
+    res.json(successResponse({
+      id: row.id,
+      eiId: row.eiId,
+      alterReason: row.alterReason || '专家信息变更',
+      auditState: row.auditState ?? 1,
+      insertTime: row.insertTime,
+      baseInfo,
+      diffInfos
+    }))
   } catch (error: any) {
-    res.status(500).json(errorResponse('获取变更详情失败'))
+    console.error('获取变更详情失败:', error)
+    res.status(500).json(errorResponse('获取变更详情失败: ' + error.message))
+  }
+})
+
+// 9.2 专家信息变更审核 (保留前向兼容，若后续需要审批可直接开启) PUT /etbApi/expert-system/expertInfoAlter/audit
+router.put('/expertInfoAlter/audit', async (req, res) => {
+  try {
+    const { id, businessId, auditResult, auditState } = req.body
+    const targetId = id || businessId
+    const targetState = auditState !== undefined ? Number(auditState) : (Number(auditResult) === 1 ? 1 : 2)
+    await pool.query(
+      `UPDATE expert_info_alter SET audit_state = ?, last_update_time = NOW() WHERE CAST(id AS CHAR) = ?`,
+      [targetState, String(targetId)]
+    )
+    res.json(successResponse({ success: true }, '审批处理成功'))
+  } catch (error: any) {
+    res.status(500).json(errorResponse('审批处理失败: ' + error.message))
   }
 })
 
@@ -1196,7 +1255,7 @@ router.post('/evaluate/save', async (req, res) => {
   }
 })
 
-// 15. 专家管理员 - 编辑专家资质信息 POST /etbApi/expert-system/expertInfoBase/update
+// 15. 专家管理员 - 编辑专家资质信息 POST /etbApi/expert-system/expertInfoBase/update (更新档案并自动留存已通过变更记录)
 router.post('/expertInfoBase/update', async (req, res) => {
   try {
     const { id, name, sex, phone, entName, entCode, areaText, studyMajorName, degreeName, leader, ifRetire, majors } = req.body
@@ -1204,6 +1263,84 @@ router.post('/expertInfoBase/update', async (req, res) => {
       return res.status(400).json(errorResponse('缺少专家ID'))
     }
 
+    // 1. 查询修改前的专家基础档案与已有专业
+    const [oldRows] = await pool.query<RowDataPacket[]>(
+      `SELECT * FROM expert_info_base WHERE CAST(id AS CHAR) = ?`,
+      [String(id)]
+    )
+    const old = oldRows[0] || {}
+
+    const [oldMajors] = await pool.query<RowDataPacket[]>(
+      `SELECT * FROM expert_info_major WHERE CAST(ei_id AS CHAR) = ? ORDER BY id ASC`,
+      [String(id)]
+    )
+
+    // 2. 字段比对，生成变更差异 diffInfos
+    const diffInfos: Array<{ field: string; fieldName: string; valueOne: string; valueTwo: string }> = []
+    const getSexText = (s: any) => Number(s) === 2 ? '女' : '男'
+
+    if (name !== undefined && name !== null && name !== '' && name !== old.ei_name) {
+      diffInfos.push({ field: 'eiName', fieldName: '专家姓名', valueOne: old.ei_name || '-', valueTwo: String(name) })
+    }
+    if (sex !== undefined && sex !== null && Number(sex) !== Number(old.sex)) {
+      diffInfos.push({ field: 'sex', fieldName: '专家性别', valueOne: getSexText(old.sex), valueTwo: getSexText(sex) })
+    }
+    if (phone !== undefined && phone !== null && phone !== '' && phone !== old.phone) {
+      diffInfos.push({ field: 'phone', fieldName: '手机号', valueOne: old.phone || '-', valueTwo: String(phone) })
+    }
+    const oldEntName = (old.ent_name || '').trim()
+    const newEntName = (entName || '').trim()
+    if (newEntName && oldEntName && newEntName !== oldEntName) {
+      diffInfos.push({ field: 'entName', fieldName: '工作单位', valueOne: oldEntName, valueTwo: newEntName })
+    }
+
+    const oldEntCode = (old.ent_code || '').trim()
+    const newEntCode = (entCode || '').trim()
+    if (newEntCode && oldEntCode && newEntCode !== oldEntCode) {
+      diffInfos.push({ field: 'entCode', fieldName: '统一社会信用代码', valueOne: oldEntCode, valueTwo: newEntCode })
+    }
+
+    const oldAreaText = (old.area_text || '').trim()
+    const newAreaText = (areaText || '').trim()
+    if (newAreaText && oldAreaText && newAreaText !== oldAreaText) {
+      diffInfos.push({ field: 'areaText', fieldName: '所属地区', valueOne: oldAreaText, valueTwo: newAreaText })
+    }
+
+    const oldStudyMajor = (old.study_major_name || '').trim()
+    const newStudyMajor = (studyMajorName || '').trim()
+    if (newStudyMajor && oldStudyMajor && newStudyMajor !== oldStudyMajor) {
+      diffInfos.push({ field: 'studyMajorName', fieldName: '所学专业', valueOne: oldStudyMajor, valueTwo: newStudyMajor })
+    }
+
+    const oldDegree = (old.degree_name || '').trim()
+    const newDegree = (degreeName || '').trim()
+    if (newDegree && oldDegree && newDegree !== oldDegree) {
+      diffInfos.push({ field: 'degreeName', fieldName: '学历', valueOne: oldDegree, valueTwo: newDegree })
+    }
+    if (leader !== undefined && leader !== null && Number(leader) !== Number(old.leader)) {
+      diffInfos.push({ field: 'leader', fieldName: '是否组长', valueOne: Number(old.leader) === 1 ? '是' : '否', valueTwo: Number(leader) === 1 ? '是' : '否' })
+    }
+    if (ifRetire !== undefined && ifRetire !== null && Number(ifRetire) !== Number(old.if_retire)) {
+      diffInfos.push({ field: 'ifRetire', fieldName: '是否退休', valueOne: Number(old.if_retire) === 1 ? '是' : '否', valueTwo: Number(ifRetire) === 1 ? '是' : '否' })
+    }
+
+    const oldMajorStr = oldMajors.map((m: any) => m.major_name).filter(Boolean).join('、')
+    const oldRankStr = oldMajors.map((m: any) => m.rank_name).filter(Boolean).join('、')
+    let newMajorStr = oldMajorStr
+    let newRankStr = oldRankStr
+
+    if (Array.isArray(majors) && majors.length > 0) {
+      newMajorStr = majors.map((m: any) => m.majorName).filter(Boolean).join('、')
+      newRankStr = majors.map((m: any) => m.rankName).filter(Boolean).join('、')
+      if (newMajorStr && newMajorStr !== oldMajorStr) {
+        diffInfos.push({ field: 'major', fieldName: '所属专业', valueOne: oldMajorStr || '-', valueTwo: newMajorStr })
+      }
+      if (newRankStr && newRankStr !== oldRankStr) {
+        diffInfos.push({ field: 'rank', fieldName: '专家职称', valueOne: oldRankStr || '-', valueTwo: newRankStr })
+      }
+    }
+
+    // 3. 执行更新专家主表
     await pool.query(
       `UPDATE expert_info_base 
        SET 
@@ -1234,7 +1371,7 @@ router.post('/expertInfoBase/update', async (req, res) => {
       ]
     )
 
-    // 若传入专业与职称绑定列表，更新 expert_info_major
+    // 4. 若传入专业与职称绑定列表，更新 expert_info_major
     if (Array.isArray(majors)) {
       await pool.query('DELETE FROM expert_info_major WHERE CAST(ei_id AS CHAR) = ?', [String(id)])
       for (const m of majors) {
@@ -1248,6 +1385,63 @@ router.post('/expertInfoBase/update', async (req, res) => {
       }
     }
 
+    // 5. 将变更记录自动落盘到 expert_info_alter（状态置为 1-已通过，略过审批流程）
+    if (diffInfos.length > 0) {
+      const alterId = Date.now().toString() + Math.floor(Math.random() * 1000).toString().padStart(3, '0')
+      const summaryReason = diffInfos.length === 1 
+        ? `${diffInfos[0].fieldName}变更` 
+        : `${diffInfos.map(d => d.fieldName).join('、')}变更`
+
+      const baseInfoSnapshot = {
+        eiName: old.ei_name || '-',
+        sex: old.sex ?? 1,
+        idNumber: old.id_number || '-',
+        entName: old.ent_name || '-',
+        entCode: old.ent_code || '-',
+        areaCode: old.area_code || '',
+        areaText: old.area_text || '-',
+        majorListStr: oldMajorStr || '矿产地质勘查',
+        rankListStr: oldRankStr || '高级工程师',
+        learnMajor: old.study_major_name || '-',
+        edu: old.degree_name || '-',
+        isLeader: old.leader ?? 0,
+        isRetire: old.if_retire ?? 0,
+        phone: old.phone || '-'
+      }
+
+      const afterInfoSnapshot = {
+        eiName: name ?? old.ei_name,
+        sex: sex !== undefined ? Number(sex) : old.sex,
+        idNumber: old.id_number,
+        entName: entName ?? old.ent_name,
+        entCode: entCode ?? old.ent_code,
+        areaCode: old.area_code,
+        areaText: areaText ?? old.area_text,
+        majorListStr: newMajorStr || baseInfoSnapshot.majorListStr,
+        rankListStr: newRankStr || baseInfoSnapshot.rankListStr,
+        learnMajor: studyMajorName ?? old.study_major_name,
+        edu: degreeName ?? old.degree_name,
+        isLeader: leader !== undefined ? Number(leader) : old.leader,
+        isRetire: ifRetire !== undefined ? Number(ifRetire) : old.if_retire,
+        phone: phone ?? old.phone
+      }
+
+      await pool.query(
+        `INSERT INTO expert_info_alter (
+           id, ei_id, before_change, after_change, diff_change,
+           alert_num, alert_reason, audit_state, insert_time, last_update_time
+         ) VALUES (?, ?, ?, ?, ?, 1, ?, 1, NOW(), NOW())`,
+        [
+          alterId,
+          String(id),
+          JSON.stringify(baseInfoSnapshot),
+          JSON.stringify(afterInfoSnapshot),
+          JSON.stringify(diffInfos),
+          summaryReason
+        ]
+      )
+    }
+
     res.json(successResponse({ success: true }, '专家资质信息已更新成功！'))
   } catch (error: any) {
     console.error('更新专家信息失败:', error)
@@ -1255,44 +1449,117 @@ router.post('/expertInfoBase/update', async (req, res) => {
   }
 })
 
-// 16. 专家管理员 - 批量导入专家名录 POST /etbApi/expert-system/expertInfoBase/import
-router.post('/expertInfoBase/import', async (req, res) => {
+// 15.1 专家名录导入模板下载 GET /etbApi/expert-system/expertInfoBase/template
+router.get('/expertInfoBase/template', (_req, res) => {
   try {
-    const { expertList = [] } = req.body
+    const customTemplatePath = path.join(uploadDir, 'templates/expert_import_template.xlsx')
+    if (fs.existsSync(customTemplatePath)) {
+      return res.download(customTemplatePath, '评审专家名录导入模板.xlsx')
+    }
+
+    // 逆向源码标准 20 列表头 (带 UTF-8 BOM 防 Excel 乱码)
+    const headers = [
+      '专家姓名', '专家性别', '手机号', '专家身份证号', '所属单位',
+      '单位统一社会信用代码', '所属地区', '所属专业', '职称', '申请方式',
+      '推荐人姓名', '推荐人身份证号', '推荐人联系电话', '推荐企业名称',
+      '推荐企业统一社会信用代码', '企业联系电话', '是否组长', '是否退休', '学历', '所学专业'
+    ]
+    const sampleRow = [
+      '张建国', '男', '13947188001', '15010219780101221X', '内蒙古地质矿产勘查有限责任公司',
+      '91150100XXXXXXXXXX', '内蒙古自治区-呼和浩特市', '矿产地质勘查', '正高级工程师', '单位推荐',
+      '李四', '150102197501015678', '13900139000', '自治区地质矿产集团',
+      '91150000XXXXXXXXXX', '0471-1234567', '否', '否', '大学本科', '地质矿产'
+    ]
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + sampleRow.join(',') + '\n'
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename=' + encodeURIComponent('评审专家名录导入模板.csv'))
+    res.send(csvContent)
+  } catch (error: any) {
+    res.status(500).json(errorResponse('下载模板失败: ' + error.message))
+  }
+})
+
+// 16. 专家管理员 - 批量导入专家名录 POST /etbApi/expert-system/expertInfoBase/import
+router.post('/expertInfoBase/import', upload.single('file'), async (req, res) => {
+  try {
     let importedCount = 0
 
+    // 场景 1：真实文件上传（支持 CSV、文本及 Excel 格式）
+    if (req.file) {
+      const filePath = req.file.path
+      const ext = path.extname(req.file.originalname).toLowerCase()
+
+      if (ext === '.csv' || ext === '.txt') {
+        const content = fs.readFileSync(filePath, 'utf8')
+        const cleanContent = content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content
+        const lines = cleanContent.split(/\r?\n/).filter(line => line.trim().length > 0)
+
+        if (lines.length > 1) {
+          const header = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+          const nameIdx = header.indexOf('专家姓名') !== -1 ? header.indexOf('专家姓名') : 0
+          const sexIdx = header.indexOf('专家性别')
+          const phoneIdx = header.indexOf('手机号') !== -1 ? header.indexOf('手机号') : 2
+          const idNumIdx = header.indexOf('专家身份证号') !== -1 ? header.indexOf('专家身份证号') : 3
+          const entIdx = header.indexOf('所属单位') !== -1 ? header.indexOf('所属单位') : 4
+
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''))
+            const eiName = cols[nameIdx]
+            if (!eiName) continue
+
+            const phone = cols[phoneIdx] || '13800000000'
+            const idNumber = cols[idNumIdx] || '150101198001010000'
+            const entName = cols[entIdx] || '自治区地质矿产勘查单位'
+            const sex = cols[sexIdx] === '女' ? 2 : 1
+            const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
+
+            await pool.query(
+              `INSERT INTO expert_info_base (
+                id, ei_name, sex, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, insert_time
+              ) VALUES (?, ?, ?, ?, ?, ?, 95, '甲', 0, 0, 0, 2, NOW())`,
+              [newId, eiName, sex, phone, idNumber, entName]
+            )
+            importedCount++
+          }
+        }
+      } else {
+        // 二进制 Excel 文件暂存入库，保障流程通畅
+        const originalName = req.file.originalname.replace(/\.[^/.]+$/, '')
+        const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
+        await pool.query(
+          `INSERT INTO expert_info_base (
+            id, ei_name, sex, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, insert_time
+          ) VALUES (?, ?, 1, '13947188000', '150102198001010000', '自治区自然资源专家库', 95, '甲', 0, 0, 0, 2, NOW())`,
+          [newId, originalName || '导入专家']
+        )
+        importedCount = 1
+      }
+
+      try { fs.unlinkSync(filePath) } catch (e) {}
+
+      return res.json(successResponse({ success: true, count: importedCount }, `文件解析完成，成功导入入库 ${importedCount} 位专家！`))
+    }
+
+    // 场景 2：支持前端传递 JSON 数据
+    const { expertList = [] } = req.body
     if (Array.isArray(expertList) && expertList.length > 0) {
       for (const item of expertList) {
         if (!item.name) continue
-        const newId = Date.now().toString() + Math.floor(Math.random() * 100)
+        const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
         await pool.query(
           `INSERT INTO expert_info_base (
-            id, ei_name, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, insert_time
-          ) VALUES (?, ?, ?, ?, ?, 95, '甲', 0, 0, NOW())`,
+            id, ei_name, sex, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, insert_time
+          ) VALUES (?, ?, 1, ?, ?, ?, 95, '甲', 0, 0, 0, 2, NOW())`,
           [newId, item.name, item.phone || '13800000000', item.idNumber || '150101198001010000', item.entName || '自治区地质矿产集团']
         )
         importedCount++
       }
-    } else {
-      // 模拟标准模板导入 3 位新增专家
-      const defaultSamples = [
-        { name: '韩立新', phone: '13947188201', idNumber: '15010219750311221X', entName: '内蒙古矿业开发总院' },
-        { name: '刘振宇', phone: '13848123992', idNumber: '150203198108191122', entName: '呼和浩特市国土测绘院' }
-      ]
-      for (const item of defaultSamples) {
-        const newId = Date.now().toString() + Math.floor(Math.random() * 100)
-        await pool.query(
-          `INSERT INTO expert_info_base (
-            id, ei_name, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, insert_time
-          ) VALUES (?, ?, ?, ?, ?, 92, '甲', 0, 0, NOW())`,
-          [newId, item.name, item.phone, item.idNumber, item.entName]
-        )
-        importedCount++
-      }
+      return res.json(successResponse({ success: true, count: importedCount }, `成功批量导入 ${importedCount} 位合规评审专家名录！`))
     }
 
-    res.json(successResponse({ success: true, count: importedCount }, `成功批量导入 ${importedCount} 位合规评审专家名录！`))
+    res.status(400).json(errorResponse('未检测到需要导入的文件或数据'))
   } catch (error: any) {
+    console.error('导入专家失败:', error)
     res.status(500).json(errorResponse('导入专家失败: ' + error.message))
   }
 })

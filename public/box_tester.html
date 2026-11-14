@@ -2,57 +2,101 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>亿维 EV-FWT 982E 语音盒子本地联调控制台</title>
+  <title>亿维 EV-FWT 982E 语音盒子本地全功能联调控制台</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fb; margin: 0; padding: 24px; color: #333; }
-    .container { max-width: 800px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); padding: 24px; }
-    h2 { margin-top: 0; color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; }
-    .status-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 12px 16px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; font-weight: 500; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f4f8; margin: 0; padding: 24px; color: #1e293b; }
+    .container { max-width: 880px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 24px; }
+    h2 { margin-top: 0; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .status-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 12px 16px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; font-weight: 500; font-size: 14px; }
     .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #10b981; }
-    .form-group { margin-bottom: 16px; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
-    input[type="text"] { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 15px; }
-    .btn-group { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
-    button { padding: 10px 18px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; color: #475569; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    .tip-text { font-size: 12px; color: #64748b; margin-top: 4px; line-height: 1.4; }
+    .section-title { font-size: 14px; font-weight: 700; color: #334155; margin: 20px 0 10px 0; border-left: 4px solid #2563eb; padding-left: 8px; }
+    .btn-group { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    button { padding: 9px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 4px; }
     .btn-primary { background: #2563eb; color: #fff; }
     .btn-primary:hover { background: #1d4ed8; }
+    .btn-success { background: #10b981; color: #fff; }
+    .btn-success:hover { background: #059669; }
+    .btn-warning { background: #f59e0b; color: #fff; }
+    .btn-warning:hover { background: #d97706; }
     .btn-danger { background: #ef4444; color: #fff; }
     .btn-danger:hover { background: #dc2626; }
-    .btn-secondary { background: #e5e7eb; color: #374151; }
-    .btn-secondary:hover { background: #d1d5db; }
-    .log-box { margin-top: 24px; }
-    textarea { width: 100%; box-sizing: border-box; height: 260px; font-family: Menlo, Monaco, monospace; font-size: 13px; background: #111827; color: #10b981; border: none; border-radius: 8px; padding: 14px; resize: vertical; }
+    .btn-secondary { background: #e2e8f0; color: #334155; }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #1e293b; cursor: pointer; margin-top: 10px; }
+    .log-box { margin-top: 20px; }
+    textarea { width: 100%; box-sizing: border-box; height: 340px; font-family: Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; background: #0f172a; color: #38bdf8; border: none; border-radius: 8px; padding: 14px; resize: vertical; }
   </style>
 </head>
 <body>
 
 <div class="container">
-  <h2>📞 亿维 EV-FWT 982E 语音盒子联调控制台</h2>
+  <h2>
+    <span>📞 亿维 EV-FWT 982E 语音盒子本地联调控制台</span>
+    <span style="font-size: 13px; font-weight: normal; color: #64748b;">局域网直连: 192.168.2.4:8555</span>
+  </h2>
   
   <div id="connStatus" class="status-bar">
     <div id="dot" class="status-dot"></div>
     <span id="statusText">正在连接语音盒子 (ws://192.168.2.4:8555/api)...</span>
   </div>
 
-  <div class="form-group">
-    <label>设备编号 (Device Name)</label>
-    <input type="text" id="devicename" value="EV982EEA9821560762" readonly style="background:#f3f4f6;">
+  <div class="grid">
+    <div class="form-group">
+      <label>设备编号 (Device Name)</label>
+      <input type="text" id="devicename" value="EV982EEA9821560762" style="background:#f8fafc;">
+      <div class="tip-text">固件 OpenDevice_Multi 返回的唯一硬件标识</div>
+    </div>
+    <div class="form-group">
+      <label>测试呼叫目标手机号</label>
+      <input type="text" id="phone" value="15327099895" placeholder="请输入要拨打的手机号码">
+      <div class="tip-text">发起拨号测试时的被叫号码</div>
+    </div>
   </div>
 
-  <div class="form-group">
-    <label>测试呼叫手机号</label>
-    <input type="text" id="phone" placeholder="请输入要测试拨打的手机号码">
+  <div class="section-title">第一步：音频下载到盒子闪存 (/mnt/webaudiodownload/)</div>
+  <div class="grid">
+    <div class="form-group">
+      <label>音频下载 URL (Mac 本地 HTTP 服务)</label>
+      <input type="text" id="audioUrl" value="http://192.168.2.1:8085/expert_notice.wav">
+      <div class="tip-text">Mac 已启动本地音频服务，盒子直接从此地址拉取</div>
+    </div>
+    <div class="form-group">
+      <label>音频 MD5 校验码 (原厂底层固件用于校验完整性)</label>
+      <input type="text" id="audioMd5" value="4424b72e4797d8cd5b14b95cc6614193">
+      <div class="tip-text">💡 关键发现：原厂 audiodownload 的 content 必须传 MD5，校验通过才落盘！</div>
+    </div>
   </div>
-
+  <div class="form-group">
+    <label>落盘文件名 / 播放文件名 (Content 必须仅为文件名)</label>
+    <input type="text" id="audioContent" value="expert_notice.wav">
+  </div>
   <div class="btn-group">
-    <button class="btn-primary" onclick="startDial()">📞 发起呼叫</button>
-    <button class="btn-danger" onclick="hangUp()">📴 挂断通话</button>
-    <button class="btn-secondary" onclick="getSignal()">📶 获取4G信号</button>
+    <button class="btn-success" onclick="downloadAudioWithMd5()">📥 1. 下发 audiodownload (传MD5校验码)</button>
+    <button class="btn-warning" onclick="checkDownload()">🔍 2. 下发 CheckAudioDownload 校验文件</button>
+    <button class="btn-primary" onclick="playAudioDirect()">🔊 3. 独立测试播放 PlayStartRecord_Multi</button>
+    <button class="btn-secondary" onclick="stopPlayAudio()">⏹ 停止播放 PlayStopRecord_Multi</button>
+  </div>
+
+  <div class="section-title">第二步：外呼通话与按键交互测试</div>
+  <div class="btn-group">
+    <button class="btn-primary" onclick="startDial()">📞 发起呼叫 Dial_Multi</button>
+    <button class="btn-success" onclick="answerCall()">🟢 接听来电 Answer_Multi</button>
+    <button class="btn-danger" onclick="hangUp()">📴 挂断通话 HangUp_Multi</button>
+    <button class="btn-secondary" onclick="getSignal()">📶 获取4G信号强度</button>
     <button class="btn-secondary" onclick="clearLogs()">🧹 清空日志</button>
   </div>
+  <label class="checkbox-label">
+    <input type="checkbox" id="autoPlay" checked>
+    通话接通时（无论是呼出 outconnected 还是呼入 inconnected）自动下发 PlayStartRecord_Multi 播放语音
+  </label>
 
   <div class="log-box">
-    <label>实时交互日志（含按键 DTMF 回调）</label>
+    <label>实时交互报文与按键 DTMF 回调（收到 1 同意 / 收到 0 拒绝）</label>
     <textarea id="logs" readonly></textarea>
   </div>
 </div>
@@ -63,6 +107,7 @@
   const logsEl = document.getElementById('logs');
   const statusText = document.getElementById('statusText');
   const dotEl = document.getElementById('dot');
+  let downloadedPath = 'expert_notice.wav';
 
   function log(msg) {
     const time = new Date().toLocaleTimeString();
@@ -71,32 +116,95 @@
   }
 
   function initWs() {
-    log(`尝试连接 ${WS_URL}...`);
-    ws = new WebSocket(WS_URL);
+    log(`尝试连接语音盒子: ${WS_URL}...`);
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      log(`WebSocket 创建异常: ${e.message}`);
+    }
 
     ws.onopen = () => {
       dotEl.style.background = '#10b981';
       statusText.innerText = '✅ 已成功连接语音盒子 (192.168.2.4:8555)';
-      log('WebSocket 连接成功！正在初始化设备 OpenDevice_Multi...');
+      log('✅ WebSocket 连接成功！正在下发 OpenDevice_Multi 初始化设备...');
       ws.send(JSON.stringify({ command: 'OpenDevice_Multi' }));
     };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        log(`📥 收到响应: ${event.data}`);
+        log(`📥 收到盒子响应: ${event.data}`);
 
-        // 识别按键事件
-        if (data.type === 'DTMF' || data.keypress) {
-          const key = data.dynamicdata?.keypress || data.keypress;
-          log(`🎯【按键回调】检测到用户手机按下按键: [ ${key} ]`);
-          if (key === '1') log('👉 【业务判定】收到 1：专家同意参加！');
-          else if (key === '0') log('👉 【业务判定】收到 0：专家放弃/拒绝！');
+        // 1. 初始化成功
+        if (data.type === 'CommandResponse' && data.data?.invoke_command === 'OpenDevice_Multi') {
+          if (data.devicename) {
+            document.getElementById('devicename').value = data.devicename;
+          }
+          log(`🎉 硬件设备初始化完毕，设备号: ${data.devicename || 'EV982EEA9821560762'}`);
         }
 
-        // 识别通话状态事件
+        // 2. 音频下载回包
+        if (data.type === 'CommandResponse' && data.data?.invoke_command === 'audiodownload') {
+          const state = data.data?.state;
+          const dyn = data.dynamicdata || {};
+          if (dyn.path) {
+            downloadedPath = dyn.path;
+            log(`✨ 盒子返回音频存储路径: [ ${downloadedPath} ]`);
+          }
+          if (state === true) {
+            log(`🎉 音频下载成功落盘！state=true，准备进行校验或播放。`);
+          } else {
+            log(`⚠️ 盒子返回 state=false: ${data.message || '请查看控制台'}`);
+          }
+        }
+
+        // 3. 校验回包
+        if (data.type === 'CommandResponse' && data.data?.invoke_command === 'CheckAudioDownload') {
+          log(`🔍 文件校验结果: state=${data.data?.state}, msg=${data.message || ''}`);
+        }
+
+        // 4. 识别按键事件 (DTMF)
+        if (data.type === 'DTMF' || data.keypress || data.dynamicdata?.dtmf) {
+          const key = String(data.dynamicdata?.dtmf || data.dynamicdata?.keypress || data.keypress || '');
+          if (key && key !== 'E') {
+            log(`🎯【按键回调成功】捕获到专家按键: [ ${key} ]`);
+            if (key === '1') log('👉 【业务判定】收到 1：专家同意参会！更新 participateState=1 并锁定！');
+            else if (key === '0' || key === '2') log('👉 【业务判定】收到 0/2：专家放弃参会！');
+
+            // 原厂标准时序：收到有效确认按键后，主动下发挂机指令
+            log('📴 收到确认按键，系统自动下发 HangUp_Multi 挂断电话！');
+            hangUp();
+          }
+        }
+
+        // 5. 识别通话状态事件
         if (data.type === 'RealTimeState') {
-          log(`📡 通话状态变化: ${data.message || ''}`);
+          const dyn = data.dynamicdata || {};
+          const state = String(dyn.realtimestate || dyn.state || data.message || '');
+          log(`📡 通话状态变化: state=${state}, 详情: ${JSON.stringify(dyn)}`);
+
+          // 呼出中：下发 closeheadsettochannel_Multi 切换信道（原厂规范，启用硬件 DTMF 按键解码）
+          if (state === 'outgoing') {
+            log('🔌 正在下发 closeheadsettochannel_Multi 切换音频通道（启用 DTMF 按键采样）...');
+            ws.send(JSON.stringify({
+              command: 'closeheadsettochannel_Multi',
+              arguments: { devicename: document.getElementById('devicename').value.trim() }
+            }));
+          }
+
+          // 呼入自动接听测试
+          if (state === 'incoming') {
+            log('📥 检测到有电话呼入，自动下发 Answer_Multi 接听...');
+            answerCall();
+          }
+
+          // 接通自动播报
+          if (state === 'outconnected' || state === 'inconnected' || state === 'connected' || state.includes('接听')) {
+            if (document.getElementById('autoPlay').checked) {
+              log('🔊 检测到通话已接通，立即自动下发 PlayStartRecord_Multi 播放语音！');
+              playAudioDirect();
+            }
+          }
         }
       } catch (e) {
         log(`收到原始消息: ${event.data}`);
@@ -105,18 +213,83 @@
 
     ws.onerror = (err) => {
       dotEl.style.background = '#ef4444';
-      statusText.innerText = '❌ 连接失败，请检查网线';
-      log('WebSocket 发生错误');
+      statusText.innerText = '❌ 连接失败，请检查网线/网桥是否连通';
+      log('WebSocket 通信错误');
     };
 
     ws.onclose = () => {
       dotEl.style.background = '#f59e0b';
-      statusText.innerText = '⚠️ 连接断开，3秒后重连...';
+      statusText.innerText = '⚠️ 连接断开，3秒后自动重连...';
       log('连接断开');
       setTimeout(initWs, 3000);
     };
   }
 
+  // 1a. 标准：下发 audiodownload (传 MD5 作为 content)
+  function downloadAudioWithMd5() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const url = document.getElementById('audioUrl').value.trim();
+    const md5 = document.getElementById('audioMd5').value.trim();
+    const payload = {
+      command: 'audiodownload',
+      arguments: { url, content: md5, devicename }
+    };
+    log(`📥 正在下发 audiodownload (content传MD5) -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+
+    log('⏳ 将在 4 秒后自动下发 CheckAudioDownload 校验文件写入状态...');
+    setTimeout(checkDownload, 4000);
+  }
+
+  // 1b. 对比：下发 audiodownload (传 文件名 作为 content)
+  function downloadAudioWithFilename() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const url = document.getElementById('audioUrl').value.trim();
+    const filename = document.getElementById('audioContent').value.trim();
+    const payload = {
+      command: 'audiodownload',
+      arguments: { url, content: filename, devicename }
+    };
+    log(`📥 正在下发 audiodownload (content传文件名) -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 2. 校验文件下载状态
+  function checkDownload() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const content = downloadedPath || document.getElementById('audioContent').value.trim();
+    const payload = {
+      command: 'CheckAudioDownload',
+      arguments: { content, devicename }
+    };
+    log(`🔍 正在下发 CheckAudioDownload 校验指令 -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 3. 播放录音
+  function playAudioDirect() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const content = document.getElementById('audioContent').value.trim();
+    const payload = {
+      command: 'PlayStartRecord_Multi',
+      arguments: { devicename, content }
+    };
+    log(`🔊 正在下发 PlayStartRecord_Multi 播音指令 -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 4. 停止播放
+  function stopPlayAudio() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const payload = {
+      command: 'PlayStopRecord_Multi',
+      arguments: { devicename }
+    };
+    log(`⏹ 正在下发 PlayStopRecord_Multi 停止播音指令 -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 5. 拨号呼出
   function startDial() {
     const phone = document.getElementById('phone').value.trim();
     const devicename = document.getElementById('devicename').value.trim();
@@ -128,27 +301,40 @@
       command: 'Dial_Multi',
       arguments: { phone, devicename }
     };
-    log(`📞 正在发起外呼 -> ${phone}...`);
+    log(`📞 正在发起拨号呼叫 -> ${phone}...`);
     ws.send(JSON.stringify(payload));
   }
 
+  // 6. 接听
+  function answerCall() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const payload = {
+      command: 'Answer_Multi',
+      arguments: { devicename }
+    };
+    log('🟢 下发 Answer_Multi 接听电话指令...');
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 7. 挂断
   function hangUp() {
     const devicename = document.getElementById('devicename').value.trim();
     const payload = {
       command: 'HangUp_Multi',
       arguments: { devicename }
     };
-    log('📴 发送挂断指令...');
+    log('📴 下发 HangUp_Multi 挂断通话指令...');
     ws.send(JSON.stringify(payload));
   }
 
+  // 8. 信号强度
   function getSignal() {
     const devicename = document.getElementById('devicename').value.trim();
     const payload = {
       command: 'GetSignalLevel_Multi',
       arguments: { devicename }
     };
-    log('📶 获取4G信号强度...');
+    log('📶 获取 4G 信号强度...');
     ws.send(JSON.stringify(payload));
   }
 
@@ -156,7 +342,7 @@
     logsEl.value = '';
   }
 
-  // 页面加载自动连接
+  // 初始化连接
   initWs();
 </script>
 

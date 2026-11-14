@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>亿维 EV-FWT 982E 语音盒子全功能联调控制台</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; background: #f0f4f8; margin: 0; padding: 24px; color: #1e293b; }
+    .container { max-width: 900px; margin: 0 auto; background: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); padding: 24px; border: 1px solid #e2e8f0; }
+    h2 { margin-top: 0; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 18px; }
+    .status-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding: 12px 16px; border-radius: 8px; background: #ecfdf5; border: 1px solid #a7f3d0; font-weight: 500; font-size: 14px; color: #065f46; }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background: #10b981; display: inline-block; margin-right: 8px; box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; color: #475569; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; color: #1e293b; background: #ffffff; }
+    input[type="text"]:focus { border-color: #2563eb; outline: none; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+    .tip-text { font-size: 12px; color: #64748b; margin-top: 4px; line-height: 1.4; }
+    .section-title { font-size: 14px; font-weight: 700; color: #1e40af; margin: 18px 0 10px 0; border-left: 4px solid #2563eb; padding-left: 8px; }
+    .btn-group { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    button { padding: 9px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 4px; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-success { background: #10b981; color: #fff; }
+    .btn-success:hover { background: #059669; }
+    .btn-warning { background: #f59e0b; color: #fff; }
+    .btn-warning:hover { background: #d97706; }
+    .btn-danger { background: #ef4444; color: #fff; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-secondary { background: #e2e8f0; color: #334155; }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .btn-purple { background: #8b5cf6; color: #fff; }
+    .btn-purple:hover { background: #7c3aed; }
+    
+    /* 按键捕获大字看板 (白底清新风格) */
+    .dtmf-banner {
+      margin: 14px 0;
+      padding: 14px 18px;
+      border-radius: 8px;
+      background: #f8fafc;
+      border: 2px dashed #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dtmf-banner.active-1 { background: #ecfdf5; border-color: #10b981; }
+    .dtmf-banner.active-0 { background: #fef2f2; border-color: #ef4444; }
+    .dtmf-title { font-size: 14px; font-weight: 700; color: #334155; }
+    .dtmf-value { font-size: 28px; font-weight: 900; font-family: monospace; padding: 2px 16px; border-radius: 6px; background: #fff; color: #2563eb; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .dtmf-result { font-size: 13px; font-weight: 500; color: #64748b; margin-top: 4px; }
+
+    /* 按键操作提醒卡片 */
+    .guide-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 14px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #1e40af;
+    }
+    .guide-box b { color: #b91c1c; }
+
+    .checkbox-label { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #334155; cursor: pointer; margin-top: 8px; }
+    .log-box { margin-top: 18px; }
+    textarea { width: 100%; box-sizing: border-box; height: 320px; font-family: Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; background: #0f172a; color: #38bdf8; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; resize: vertical; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>
+    <span>📞 亿维 EV-FWT 982E 语音盒子本地联调控制台</span>
+    <span style="font-size: 13px; font-weight: normal; color: #64748b;">局域网直连: 192.168.2.4:8555</span>
+  </h2>
+  
+  <div id="connStatus" class="status-bar">
+    <div>
+      <span id="dot" class="status-dot"></span>
+      <span id="statusText">正在连接语音盒子 (ws://192.168.2.4:8555/api)...</span>
+    </div>
+    <div id="signalBadge" style="font-size: 12px; font-weight: 600; color: #047857;">4G 信号: 待获取</div>
+  </div>
+
+  <!-- 专家手机按键高亮看板 -->
+  <div id="dtmfBanner" class="dtmf-banner">
+    <div>
+      <div class="dtmf-title">🎯 实时按键捕获状态 (DTMF Listener)</div>
+      <div id="dtmfResult" class="dtmf-result">等待通话中按键...（手机接听后在拨号键盘按 1 或 0）</div>
+    </div>
+    <div id="dtmfKey" class="dtmf-value">--</div>
+  </div>
+
+  <!-- 手机按键操作要领卡片 -->
+  <div class="guide-box">
+    📌 <b>手机按键特别注意事项（排查按键无反馈）</b>：<br>
+    1. <b>按键界面</b>：接听电话后，必须在通话界面点击【<b>拨号键盘</b>】（Keypad），在数字键盘上按。<br>
+    2. <b>按键时长</b>：<b>请按住数字 1 或 0 持续约 1 秒（长按）</b>，不要轻点一下！4G VoLTE 语音编码（AMR）对极短脉冲会有回音抑制与过滤，长按才能发出持续双音频信号。<br>
+    3. <b>按键时机</b>：女声播报“按1同意，按0放弃”播放完毕（日志出现 <code>isplaying: false</code>）后长按，此时信道处于静音接收期。
+  </div>
+
+  <div class="grid" style="margin-top: 14px;">
+    <div class="form-group">
+      <label>设备编号 (Device Name)</label>
+      <input type="text" id="devicename" value="EV982EEA9821560762" style="background:#f8fafc;">
+      <div class="tip-text">固件 OpenDevice_Multi 返回的唯一硬件标识</div>
+    </div>
+    <div class="form-group">
+      <label>测试呼叫目标手机号</label>
+      <input type="text" id="phone" value="15738718071" placeholder="请输入要拨打的手机号码">
+      <div class="tip-text">发起拨号测试时的被叫号码</div>
+    </div>
+  </div>
+
+  <div class="section-title">第一步：音频下载到盒子闪存 (/mnt/webaudiodownload/)</div>
+  <div class="grid">
+    <div class="form-group">
+      <label>音频下载 URL (Mac 本地 HTTP: 192.168.2.1:8085)</label>
+      <input type="text" id="audioUrl" value="http://192.168.2.1:8085/expert_notice.wav">
+      <div class="tip-text">Mac 已启动本地音频服务，盒子直接从此地址拉取</div>
+    </div>
+    <div class="form-group">
+      <label>音频 MD5 校验码 (原厂底层固件校验完整性)</label>
+      <input type="text" id="audioMd5" value="4424b72e4797d8cd5b14b95cc6614193">
+      <div class="tip-text">💡 原厂 audiodownload 的 content 必须传 MD5，校验通过才落盘！</div>
+    </div>
+  </div>
+  <div class="form-group">
+    <label>落盘文件名 / 播放文件名 (Content 必须仅为文件名)</label>
+    <input type="text" id="audioContent" value="expert_notice.wav">
+  </div>
+  <div class="btn-group">
+    <button class="btn-success" onclick="downloadAudioWithMd5()">📥 1. 下发 audiodownload (传MD5校验码)</button>
+    <button class="btn-warning" onclick="checkDownload()">🔍 2. 下发 CheckAudioDownload 校验文件</button>
+    <button class="btn-primary" onclick="playAudioDirect()">🔊 3. 独立测试播放 PlayStartRecord_Multi</button>
+    <button class="btn-secondary" onclick="stopPlayAudio()">⏹ 停止播放 PlayStopRecord_Multi</button>
+  </div>
+
+  <div class="section-title">第二步：外呼通话与 DTMF 按键排查</div>
+  <div class="btn-group">
+    <button class="btn-primary" onclick="startDial()" style="font-size: 14px; padding: 10px 18px;">📞 发起外呼呼叫 Dial_Multi</button>
+    <button class="btn-success" onclick="answerCall()">🟢 接听来电 Answer_Multi</button>
+    <button class="btn-danger" onclick="hangUp()">📴 挂断通话 HangUp_Multi</button>
+    <button class="btn-purple" onclick="switchChannelManual()">🔌 切换信道 closeheadsettochannel_Multi</button>
+    <button class="btn-secondary" onclick="openUsbAudioManual()">🎙️ 开启音频直通 openusbaududiotousbrecord_Multi</button>
+    <button class="btn-secondary" onclick="sendSimulatedDtmf('1')">🔢 模拟向盒子注入按键 1</button>
+    <button class="btn-secondary" onclick="getSignal()">📶 获取4G信号强度</button>
+    <button class="btn-secondary" onclick="clearLogs()">🧹 清空日志</button>
+  </div>
+
+  <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 10px;">
+    <label class="checkbox-label">
+      <input type="checkbox" id="autoPlay" checked>
+      通话接通时自动播放语音 (PlayStartRecord_Multi)
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" id="autoHangupOnKey" checked>
+      收到有效按键 (1或0) 自动挂断电话 (原厂规范)
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" id="autoSwitchChannel" checked>
+      呼出及接通时自动切换信道 (closeheadsettochannel_Multi)
+    </label>
+  </div>
+
+  <div class="log-box">
+    <label>实时交互报文与按键 DTMF 回调（收到 1 同意 / 收到 0 拒绝）</label>
+    <textarea id="logs" readonly></textarea>
+  </div>
+</div>
+
+<script>
+  let ws = null;
+  const WS_URL = 'ws://192.168.2.4:8555/api';
+  const logsEl = document.getElementById('logs');
+  const statusText = document.getElementById('statusText');
+  const dotEl = document.getElementById('dot');
+  const dtmfBanner = document.getElementById('dtmfBanner');
+  const dtmfKeyEl = document.getElementById('dtmfKey');
+  const dtmfResultEl = document.getElementById('dtmfResult');
+  const signalBadge = document.getElementById('signalBadge');
+  let downloadedPath = 'expert_notice.wav';
+
+  function log(msg) {
+    const time = new Date().toLocaleTimeString();
+    logsEl.value += `[${time}] ${msg}\n`;
+    logsEl.scrollTop = logsEl.scrollHeight;
+  }
+
+  function initWs() {
+    log(`尝试连接语音盒子: ${WS_URL}...`);
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      log(`WebSocket 创建异常: ${e.message}`);
+    }
+
+    ws.onopen = () => {
+      dotEl.style.background = '#10b981';
+      statusText.innerText = '✅ 已成功连接语音盒子 (192.168.2.4:8555)';
+      log('✅ WebSocket 连接成功！正在下发 OpenDevice_Multi 初始化设备...');
+      ws.send(JSON.stringify({ command: 'OpenDevice_Multi' }));
+      setTimeout(() => { getSignal(); }, 1000);
+    };
+
+    ws.onmessage = (event) => {
+      const rawText = event.data;
+      log(`📥 收到盒子响应: ${rawText}`);
+
+      try {
+        const data = JSON.parse(rawText);
+        const msgType = data.type || '';
+
+        // 1. 初始化成功
+        if (msgType === 'CommandResponse' && data.data?.invoke_command === 'OpenDevice_Multi') {
+          if (data.devicename) {
+            document.getElementById('devicename').value = data.devicename;
+          }
+          log(`🎉 硬件设备初始化完毕，设备号: ${data.devicename || 'EV982EEA9821560762'}, state: ${data.data?.state}`);
+        }
+
+        // 2. 信号强度回包
+        if (msgType === 'CommandResponse' && data.data?.invoke_command === 'GetSignalLevel_Multi') {
+          signalBadge.innerText = `4G 信号强度: ${data.data?.signallevel || data.message || '良好'}`;
+        }
+
+        // 3. 信道切换回包
+        if (msgType === 'CommandResponse' && data.data?.invoke_command === 'closeheadsettochannel_Multi') {
+          log(`🔌 信道切换结果: state=${data.data?.state}, msg=${data.message || '信道已转接至芯片'}`);
+        }
+
+        // 4. 音频下载回包
+        if (msgType === 'CommandResponse' && data.data?.invoke_command === 'audiodownload') {
+          const state = data.data?.state;
+          const dyn = data.dynamicdata || {};
+          if (dyn.path) downloadedPath = dyn.path;
+          if (state === true) {
+            log(`🎉 音频下载成功落盘！state=true, path=[ ${downloadedPath} ]`);
+          } else {
+            log(`⚠️ 音频下载返回 state=false: ${data.message || '请检查'}`);
+          }
+        }
+
+        // 5. 校验回包
+        if (msgType === 'CommandResponse' && data.data?.invoke_command === 'CheckAudioDownload') {
+          log(`🔍 文件校验结果: state=${data.data?.state}, msg=${data.message || ''}`);
+        }
+
+        // 6. 播音状态
+        if (msgType === 'PlayState') {
+          const dyn = data.dynamicdata || {};
+          const isPlaying = String(dyn.isplaying) === 'true';
+          log(`🔊 播音状态: isplaying=${isPlaying}, file=${dyn.filename || ''}`);
+          if (!isPlaying) {
+            log(`✨【重要提示】女声播音已结束！信道处于静音接收期，请立即在手机通话界面【拨号键盘】长按 1 或 0！`);
+          }
+        }
+
+        // 7. 识别通话状态事件
+        if (msgType === 'RealTimeState') {
+          const dyn = data.dynamicdata || {};
+          const state = String(dyn.realtimestate || dyn.state || data.message || '').toLowerCase();
+          log(`📡 通话状态变化: state=${state}, 详情: ${JSON.stringify(dyn)}`);
+
+          // 呼出中 (outgoing)：下发 closeheadsettochannel_Multi
+          if (state === 'outgoing') {
+            if (document.getElementById('autoSwitchChannel').checked) {
+              log('🔌 正在下发 closeheadsettochannel_Multi 切换音频通道（启用 DTMF 采样）...');
+              switchChannelManual();
+            }
+          }
+
+          // 呼入自动接听测试
+          if (state === 'incoming') {
+            log(`📥 检测到有电话呼入 (${dyn.number || ''})，自动下发 Answer_Multi 接听...`);
+            answerCall();
+          }
+
+          // 接通 (outconnected / inconnected)
+          if (state === 'outconnected' || state === 'inconnected' || state === 'connected') {
+            log(`🎉 通话已正式接通！state=${state}`);
+            // 接通瞬间再次确保信道切换
+            if (document.getElementById('autoSwitchChannel').checked) {
+              switchChannelManual();
+            }
+            if (document.getElementById('autoPlay').checked) {
+              log('🔊 检测到通话已接通，立即自动下发 PlayStartRecord_Multi 播放语音！');
+              playAudioDirect();
+            }
+          }
+
+          // 检查 RealTimeState 是否附带 dtmf
+          if (dyn.dtmf) {
+            handleDtmfCaptured(String(dyn.dtmf));
+          }
+        }
+
+        // 8. 核心：识别按键事件 (DTMF 深度兼容解析)
+        let extractedDtmf = null;
+        if (msgType === 'DTMF') {
+          let dyn = data.dynamicdata;
+          if (typeof dyn === 'string') {
+            try { dyn = JSON.parse(dyn); } catch(e) {}
+          }
+          extractedDtmf = dyn?.dtmf || data.dtmf || dyn?.keypress || data.keypress;
+          if (!extractedDtmf) {
+            log(`⚠️ 收到 DTMF 报文类型但未能直接提取 dtmf 字段: ${rawText}`);
+          }
+        } else if (data.keypress) {
+          extractedDtmf = data.keypress;
+        } else if (data.dynamicdata?.dtmf) {
+          extractedDtmf = data.dynamicdata.dtmf;
+        }
+
+        if (extractedDtmf) {
+          handleDtmfCaptured(String(extractedDtmf));
+        }
+
+      } catch (e) {
+        log(`收到原始消息: ${rawText}`);
+      }
+    };
+
+    ws.onerror = (err) => {
+      dotEl.style.background = '#ef4444';
+      statusText.innerText = '❌ 连接失败，请检查网线/网桥是否连通';
+      log('WebSocket 通信错误');
+    };
+
+    ws.onclose = () => {
+      dotEl.style.background = '#f59e0b';
+      statusText.innerText = '⚠️ 连接断开，3秒后自动重连...';
+      log('连接断开');
+      setTimeout(initWs, 3000);
+    };
+  }
+
+  // 处理捕获到的按键
+  function handleDtmfCaptured(key) {
+    const cleanKey = key.trim();
+    if (cleanKey === 'E') {
+      log(`ℹ️ 收到载波结束/静音信号 (E)，按协议规范予以忽略`);
+      return;
+    }
+
+    log(`🎯🎯🎯【按键回调成功】捕获到专家按键: [ ${cleanKey} ]`);
+    dtmfKeyEl.innerText = cleanKey;
+
+    if (cleanKey === '1') {
+      dtmfBanner.className = 'dtmf-banner active-1';
+      dtmfResultEl.innerHTML = '✅ <span style="color:#059669;font-weight:700;">收到按键 1：专家同意参会！</span> 更新 participateState=1 并锁定！';
+    } else if (cleanKey === '0' || cleanKey === '2') {
+      dtmfBanner.className = 'dtmf-banner active-0';
+      dtmfResultEl.innerHTML = '❌ <span style="color:#dc2626;font-weight:700;">收到按键 0/2：专家放弃参会！</span> 更新 participateState=2！';
+    } else {
+      dtmfBanner.className = 'dtmf-banner';
+      dtmfResultEl.innerHTML = `⚠️ 收到其他按键: [ ${cleanKey} ]`;
+    }
+
+    // 收到按键后自动挂机
+    if (document.getElementById('autoHangupOnKey').checked) {
+      log('📴 收到按键确认，系统遵循业务闭环时序，自动下发 HangUp_Multi 挂断通话！');
+      hangUp();
+    }
+  }
+
+  // 1. 下发 audiodownload (传 MD5 作为 content)
+  function downloadAudioWithMd5() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const url = document.getElementById('audioUrl').value.trim();
+    const md5 = document.getElementById('audioMd5').value.trim();
+    const payload = {
+      command: 'audiodownload',
+      arguments: { url, content: md5, devicename }
+    };
+    log(`📥 正在下发 audiodownload (content传MD5) -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+    setTimeout(checkDownload, 4000);
+  }
+
+  // 2. 校验文件下载状态
+  function checkDownload() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const content = downloadedPath || document.getElementById('audioContent').value.trim();
+    const payload = {
+      command: 'CheckAudioDownload',
+      arguments: { content, devicename }
+    };
+    log(`🔍 正在下发 CheckAudioDownload 校验指令 -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 3. 播放录音
+  function playAudioDirect() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const content = document.getElementById('audioContent').value.trim();
+    const payload = {
+      command: 'PlayStartRecord_Multi',
+      arguments: { devicename, content }
+    };
+    log(`🔊 正在下发 PlayStartRecord_Multi 播音指令 -> ${JSON.stringify(payload)}`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 4. 停止播放
+  function stopPlayAudio() {
+    const devicename = document.getElementById('devicename').value.trim();
+    const payload = {
+      command: 'PlayStopRecord_Multi',
+      arguments: { devicename }
+    };
+    log(`⏹ 正在下发 PlayStopRecord_Multi 停止播音指令...`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 5. 拨号呼出
+  function startDial() {
+    const phone = document.getElementById('phone').value.trim();
+    const devicename = document.getElementById('devicename').value.trim();
+    if (!phone) {
+      alert('请输入测试手机号！');
+      return;
+    }
+    // 重置按键看板
+    dtmfBanner.className = 'dtmf-banner';
+    dtmfKeyEl.innerText = '--';
+    dtmfResultEl.innerText = '拨号中，等待接听与按键...';
+
+    const payload = {
+      command: 'Dial_Multi',
+      arguments: { phone, devicename }
+    };
+    log(`📞 发起外呼呼叫 -> ${phone}...`);
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 6. 接听
+  function answerCall() {
+    const devicename = document.getElementById('devicename').value.trim();
+    ws.send(JSON.stringify({
+      command: 'Answer_Multi',
+      arguments: { devicename }
+    }));
+  }
+
+  // 7. 挂断
+  function hangUp() {
+    const devicename = document.getElementById('devicename').value.trim();
+    ws.send(JSON.stringify({
+      command: 'HangUp_Multi',
+      arguments: { devicename }
+    }));
+  }
+
+  // 8. 手动切换信道 (closeheadsettochannel_Multi)
+  function switchChannelManual() {
+    const devicename = document.getElementById('devicename').value.trim();
+    log(`🔌 发送 closeheadsettochannel_Multi 切换音频通道...`);
+    ws.send(JSON.stringify({
+      command: 'closeheadsettochannel_Multi',
+      arguments: { devicename }
+    }));
+  }
+
+  // 9. 开启音频直通 (openusbaududiotousbrecord_Multi)
+  function openUsbAudioManual() {
+    const devicename = document.getElementById('devicename').value.trim();
+    log(`🎙️ 发送 openusbaududiotousbrecord_Multi 开启音频直通...`);
+    ws.send(JSON.stringify({
+      command: 'openusbaududiotousbrecord_Multi',
+      arguments: { devicename }
+    }));
+  }
+
+  // 10. 模拟发送 DTMF (验证业务链路)
+  function sendSimulatedDtmf(key) {
+    const devicename = document.getElementById('devicename').value.trim();
+    log(`🔢 模拟发送 SendDTMF_Multi (content=${key})...`);
+    ws.send(JSON.stringify({
+      command: 'SendDTMF_Multi',
+      arguments: { content: key, devicename }
+    }));
+  }
+
+  // 11. 信号强度
+  function getSignal() {
+    const devicename = document.getElementById('devicename').value.trim();
+    ws.send(JSON.stringify({
+      command: 'GetSignalLevel_Multi',
+      arguments: { devicename }
+    }));
+  }
+
+  function clearLogs() {
+    logsEl.value = '';
+  }
+
+  // 初始化连接
+  initWs();
+</script>
+
+</body>
+</html>

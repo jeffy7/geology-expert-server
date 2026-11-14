@@ -32,6 +32,14 @@ if (!fs.existsSync(uploadDir)) {
 }
 app.use('/uploads', express.static(uploadDir))
 
+// 静态资源与硬件调试控制台
+const publicDir = path.join(__dirname, '../public')
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir, { recursive: true })
+}
+app.use('/public', express.static(publicDir))
+app.use(express.static(publicDir))
+
 // 统一日志记录
 app.use((req, _res, next) => {
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`)

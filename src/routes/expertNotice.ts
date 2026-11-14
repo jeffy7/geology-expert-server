@@ -1,20 +1,22 @@
 import { Router } from 'express'
 import { pool } from '../config/db'
 import { successResponse, errorResponse } from '../types'
-import { sendTtsVoice, sendCodeVoice, getVmsConfigSummary, printVmsProperties, vmsConfig } from '../services/vms'
 import { voiceBoxService } from '../services/voiceBox'
 import type { RowDataPacket, ResultSetHeader } from 'mysql2'
 
 const router = Router()
 
-// 1. 获取语音外呼服务状态与脱敏配置 GET /etbApi/expert-notice/config
+// 1. 获取语音盒子状态与配置 GET /etbApi/expert-notice/config
 router.get('/config', (_req, res) => {
-  res.json(successResponse(getVmsConfigSummary(), '外呼服务配置查询成功'))
+  res.json(successResponse({
+    channel: 'voicebox',
+    status: voiceBoxService.getStatus()
+  }, '语音盒子服务配置正常'))
 })
 
-// 2. 打印原生 VmsProperties GET /etbApi/expert-notice/print-vms-properties
+// 2. 打印语音盒子硬件状态 GET /etbApi/expert-notice/print-vms-properties
 router.get('/print-vms-properties', (_req, res) => {
-  res.json(successResponse(printVmsProperties()))
+  res.json(successResponse(voiceBoxService.getStatus()))
 })
 
 // 2.1 语音盒子实时连接状态 GET /etbApi/expert-notice/voicebox-status
@@ -44,16 +46,20 @@ router.get('/start', async (req, res) => {
       link_phone: '0471-12345678'
     }
 
-    // 2. 查询需要通知的专家名单
+    // 2. 查询需要通知的专家名单（关联专家库最新手机号，优先以专家库当前手机号为准）
     let querySql = `
-      SELECT r.id, r.project_id, r.rule_id, r.ei_id, r.ei_name, r.ei_phone, IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader, r.notice_state
+      SELECT r.id, r.project_id, r.rule_id, r.ei_id, r.ei_name, COALESCE(b.phone, r.ei_phone) as ei_phone, IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader, r.notice_state
       FROM extract_rule_result r
+      LEFT JOIN expert_info_base b ON r.ei_id = b.id
       WHERE r.project_id = ? AND r.rule_id = ?
     `
     const qParams: any[] = [projectId, ruleId]
     if (groupId) {
-      querySql += ` AND r.group_id = ?`
-      qParams.push(groupId)
+      if (String(groupId) === '1' || String(groupId).includes('leader')) {
+        querySql += ` AND (r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%')`
+      } else if (String(groupId) === '2' || String(groupId).includes('crew') || String(groupId).includes('member')) {
+        querySql += ` AND (r.condition_key NOT LIKE '%leader%' AND r.condition_key NOT LIKE '%Leader%')`
+      }
     }
 
     const [ruleResults] = await pool.query<RowDataPacket[]>(querySql, qParams)
@@ -61,24 +67,20 @@ router.get('/start', async (req, res) => {
       return res.json(successResponse(null, '未找到待通知的专家记录'))
     }
 
-    // 3. 循环发起外呼并记录流水
+    // 3. 循环发起语音盒子外呼并记录流水
     const noticeDetails: any[] = []
     for (const r of ruleResults) {
       if (!r.ei_phone) continue
 
-      const templateParams = [
-        project.project_name || '地质矿产专家抽取评审',
-        r.leader === 1 ? '组长' : '组员',
-        project.evaluation_room || '专家评审会议室'
-      ]
+      // 同步更新抽取结果表中的手机号为最新修改的手机号
+      await pool.query(
+        `UPDATE extract_rule_result SET ei_phone = ? WHERE id = ?`,
+        [r.ei_phone, r.id]
+      ).catch(() => {})
 
-      let callResult: any
-      if (vmsConfig.channel === 'voicebox') {
-        callResult = await voiceBoxService.dial(r.ei_phone, { extractRuleResultId: r.id })
-      } else {
-        callResult = await sendTtsVoice(r.ei_phone, templateParams)
-      }
-      const callId = callResult.callId || `call-${Date.now()}-${r.id}`
+      // 全面采用语音盒子进行真实拨号呼叫
+      const callResult = await voiceBoxService.dial(r.ei_phone, { extractRuleResultId: r.id })
+      const callId = callResult.callId || `vb-${Date.now()}-${r.id}`
 
       // 插入/更新 notice_expert_callback 表
       const callbackId = Date.now() + Math.floor(Math.random() * 1000)
@@ -90,11 +92,11 @@ router.get('/start', async (req, res) => {
           callbackId,
           r.id,
           callId,
-          `已发起首次语音通知 (${vmsConfig.channel === 'voicebox' ? '语音盒子' : '腾讯云VMS'})`
+          `已发起硬件语音盒子外呼通知 (设备: ${voiceBoxService.getStatus().devicename})`
         ]
       ).catch(e => console.warn('[expert-notice] 记录通知流水异常:', e.message))
 
-      // 更新 extract_rule_result 表的通知状态 notice_state = 1
+      // 更新 extract_rule_result 表的通知状态 notice_state = 1 (通知中)
       await pool.query(
         `UPDATE extract_rule_result SET notice_state = 1 WHERE id = ?`,
         [r.id]
@@ -109,7 +111,13 @@ router.get('/start', async (req, res) => {
       })
     }
 
-    res.json(successResponse({ count: noticeDetails.length, details: noticeDetails }, '专家外呼通知已批量下发'))
+    // 更新规则抽取状态为通知中 EXTRACTING_NOTICEING (21)
+    await pool.query(
+      `UPDATE extract_rule SET extracting_state = 21 WHERE id = ?`,
+      [ruleId]
+    ).catch(() => {})
+
+    res.json(successResponse({ count: noticeDetails.length, details: noticeDetails }, '专家语音盒子外呼通知已批量下发'))
   } catch (error: any) {
     console.error('[expert-notice] 启动通知失败:', error)
     res.status(500).json(errorResponse(error.message || '启动通知失败'))
@@ -133,8 +141,11 @@ router.get('/continue', async (req, res) => {
     `
     const qParams: any[] = [projectId, ruleId]
     if (groupId) {
-      querySql += ` AND r.group_id = ?`
-      qParams.push(groupId)
+      if (String(groupId) === '1' || String(groupId).includes('leader')) {
+        querySql += ` AND (r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%')`
+      } else if (String(groupId) === '2' || String(groupId).includes('crew') || String(groupId).includes('member')) {
+        querySql += ` AND (r.condition_key NOT LIKE '%leader%' AND r.condition_key NOT LIKE '%Leader%')`
+      }
     }
 
     const [rows] = await pool.query<RowDataPacket[]>(querySql, qParams)
@@ -143,11 +154,11 @@ router.get('/continue', async (req, res) => {
     for (const r of rows) {
       if (!r.ei_phone) continue
       const currentRetry = Number(r.retry_num || 0) + 1
-      if (currentRetry > vmsConfig.retryNum) {
+      if (currentRetry > 3) {
         continue // 超过最大重试次数
       }
 
-      const callResult = await sendTtsVoice(r.ei_phone, ['地调院专家评审补呼通知'])
+      const callResult = await voiceBoxService.dial(r.ei_phone, { extractRuleResultId: r.id })
       const callId = callResult.callId || `continue-${Date.now()}-${r.id}`
 
       if (r.callback_id) {
@@ -308,26 +319,23 @@ router.get('/test-send-sms', (_req, res) => {
 })
 
 // 9. 原生测试外呼接口 GET /etbApi/expert-notice/send-test-message
-router.get('/send-test-message', async (_req, res) => {
-  const result = await sendTtsVoice('13800000000', ['测试项目', '专家评审测试'])
+router.get('/send-test-message', async (req, res) => {
+  const { phone } = req.query
+  if (!phone) {
+    return res.status(400).json(errorResponse('请提供 phone 参数'))
+  }
+  const result = await voiceBoxService.dial(String(phone))
   res.json(successResponse(result))
 })
 
 // 10. 发起单通测试外呼 POST /etbApi/expert-notice/test-call
 router.post('/test-call', async (req, res) => {
   try {
-    const { phone, type = 'tts', code = '8888', params } = req.body
+    const { phone } = req.body
     if (!phone) {
       return res.status(400).json(errorResponse('必须提供测试手机号 phone'))
     }
-
-    let result
-    if (type === 'code') {
-      result = await sendCodeVoice(phone, String(code))
-    } else {
-      result = await sendTtsVoice(phone, params || ['地调院专家评审测试', '准时参加'])
-    }
-
+    const result = await voiceBoxService.dial(phone)
     if (result.success) {
       res.json(successResponse(result, result.message))
     } else {
@@ -339,29 +347,31 @@ router.post('/test-call', async (req, res) => {
   }
 })
 
-// 11. 语音设备/腾讯云 VMS 结果回调接口 POST /etbApi/expert-notice/callback
+// 11. 语音设备按键/结果回调接口 POST /etbApi/expert-notice/callback
 router.post('/callback', async (req, res) => {
   try {
     const payload = req.body || {}
     console.log('[expert-notice] 收到语音外呼回调通知:', JSON.stringify(payload))
 
-    // 兼容多种回调字段格式（语音盒子与腾讯云）
     const callId = payload.callId || payload.callid || payload.voiceId
     const mobile = payload.mobile || payload.calledNumber || payload.phone
     const keypress = payload.keypress || payload.keyPress || payload.digit || (payload.voicekeyCallback && payload.voicekeyCallback.keypress)
-    const failureCode = payload.failure_code || payload.failureCode
 
-    if (callId) {
-      const isAgree = String(keypress) === String(vmsConfig.agreeKey)
-      const isReject = String(keypress) === String(vmsConfig.rejectKey)
+    if (callId || mobile) {
+      const isAgree = String(keypress) === '1'
+      const isReject = String(keypress) === '2' || String(keypress) === '0'
 
       // 1. 查找是否存在对应的回调流水
-      const [cbRows] = await pool.query<RowDataPacket[]>(
-        `SELECT id, extrace_rule_result_id FROM notice_expert_callback WHERE call_id = ?`,
-        [callId]
-      )
-
-      let resultId = cbRows[0]?.extrace_rule_result_id
+      let resultId = null
+      let cbId = null
+      if (callId) {
+        const [cbRows] = await pool.query<RowDataPacket[]>(
+          `SELECT id, extrace_rule_result_id FROM notice_expert_callback WHERE call_id = ?`,
+          [callId]
+        )
+        cbId = cbRows[0]?.id
+        resultId = cbRows[0]?.extrace_rule_result_id
+      }
 
       if (!resultId && mobile) {
         // 通过手机号查找最近一次抽取结果
@@ -373,36 +383,23 @@ router.post('/callback', async (req, res) => {
       }
 
       // 2. 记录到流水表
-      if (cbRows[0]?.id) {
+      if (cbId) {
         await pool.query(
           `UPDATE notice_expert_callback
            SET voicekey_callback = ?, remark = ?, last_update_time = NOW()
            WHERE id = ?`,
           [
             JSON.stringify(payload),
-            isAgree ? '专家按键【1】确认同意参会' : isReject ? '专家按键【2】拒绝参会' : '专家按键超时或通话异常',
-            cbRows[0].id
+            isAgree ? '专家按键【1】确认同意参会' : isReject ? '专家按键【2/0】拒绝参会' : '专家按键超时或通话异常',
+            cbId
           ]
         )
-      } else {
-        await pool.query(
-          `INSERT INTO notice_expert_callback
-           (id, extrace_rule_result_id, call_id, retry_num, remark, voicekey_callback, insert_time)
-           VALUES (?, ?, ?, 0, ?, ?, NOW())`,
-          [
-            Date.now(),
-            resultId || null,
-            callId,
-            isAgree ? '专家按键【1】确认同意参会' : isReject ? '专家按键【2】拒绝参会' : '专家按键超时',
-            JSON.stringify(payload)
-          ]
-        ).catch(() => {})
       }
 
       // 3. 联动更新 extract_rule_result 与 expert_info_base 专家锁定状态
       if (resultId) {
         const [rData] = await pool.query<RowDataPacket[]>(
-          `SELECT id, ei_id, project_id FROM extract_rule_result WHERE id = ?`,
+          `SELECT id, ei_id, project_id, rule_id FROM extract_rule_result WHERE id = ?`,
           [resultId]
         )
         const eiId = rData[0]?.ei_id
@@ -439,14 +436,6 @@ router.post('/callback', async (req, res) => {
           console.log(`[expert-notice] 专家 (ID: ${eiId}) 拒绝参会，已解除锁定以备补抽`)
         }
       }
-
-      // 4. 若为腾讯云严重错误码，停用账号
-      if (failureCode && vmsConfig.ignoreRetryFailCodeList.includes(Number(failureCode)) && mobile) {
-        await pool.query(
-          `UPDATE expert_info_base SET status = 1 WHERE phone = ?`,
-          [mobile.replace(/^\+86/, '')]
-        ).catch(() => {})
-      }
     }
 
     res.json({ result: 0, errmsg: 'OK' })
@@ -454,6 +443,16 @@ router.post('/callback', async (req, res) => {
     console.error('[expert-notice] 回调处理异常:', error)
     res.status(500).json({ result: -1, errmsg: error.message })
   }
+})
+
+// 12. 调试：手动触发盒子下载音频 GET /etbApi/expert-notice/trigger-download
+router.get('/trigger-download', (req, res) => {
+  const url = req.query.url as string
+  if (url) {
+    process.env.VOICEBOX_AUDIO_URL = url
+  }
+  voiceBoxService.downloadNoticeAudio()
+  res.json(successResponse({ url: process.env.VOICEBOX_AUDIO_URL || 'http://192.168.2.1:8085/expert_notice.wav' }, '已下发音频下载指令给盒子'))
 })
 
 export default router

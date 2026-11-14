@@ -1476,8 +1476,8 @@ router.get('/extractActive/getCurrentExtractResult', async (req, res) => {
         CAST(r.ei_id AS CHAR) as eiId,
         r.ei_name as expertName,
         r.ei_name as eiName,
-        r.ei_phone as phone,
-        r.ei_phone as eiPhone,
+        COALESCE(b.phone, r.ei_phone) as phone,
+        COALESCE(b.phone, r.ei_phone) as eiPhone,
         r.ei_card_no as idCard,
         r.ei_card_no as eiCardNo,
         r.ei_ent_name as company,
@@ -1504,6 +1504,7 @@ router.get('/extractActive/getCurrentExtractResult', async (req, res) => {
         DATE_FORMAT(r.extract_time, '%Y-%m-%d %H:%i:%s') as extractTime
        FROM extract_rule_result r
        LEFT JOIN extract_rule_condition c ON r.condition_id = c.id
+       LEFT JOIN expert_info_base b ON r.ei_id = b.id
        WHERE (r.rule_id = ? OR r.project_id = ?)
        ORDER BY leader ASC, r.id ASC`,
       [targetId, targetId]

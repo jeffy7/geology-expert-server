@@ -1,4 +1,7 @@
 import net from 'net'
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
 import { pool } from '../config/db'
 import type { RowDataPacket } from 'mysql2'
 
@@ -6,6 +9,7 @@ export interface ActiveCallMeta {
   callId: string
   phone: string
   extractRuleResultId?: number
+  audioUrl?: string   // 接通后播放的语音 URL（服务器生成的 TTS 音频）
   startTime: number
 }
 
@@ -167,20 +171,66 @@ class VoiceBoxService {
           this.devicename = data.devicename
         }
         console.log(`[VoiceBox-IoT] 硬件就绪，设备号: ${this.devicename}, 状态: ${data.data?.state}`)
+
+        // 硬件就绪后，立即下发通知音频下载指令，确保 /mnt/webaudiodownload/expert_notice.wav 预先下载就绪
+        this.downloadNoticeAudio()
+        return
+      }
+
+      // 1.1 音频下载结果响应
+      if (msgType === 'CommandResponse' && data.data?.invoke_command === 'audiodownload') {
+        console.log(`[VoiceBox-IoT] 📥 盒子音频下载状态回包: state=${data.data?.state}, message=${data.message || '下载成功'}`)
         return
       }
 
       // 2. 捕获专家按键事件 (DTMF)
-      if (msgType === 'DTMF' || data.keypress) {
-        const key = String(data.dynamicdata?.keypress || data.keypress || '')
-        console.log(`[VoiceBox-IoT] 🎯 捕获到专家手机按键: [ ${key} ]`)
-        this.handleKeypressCallback(key, data)
-        return
+      if (msgType === 'DTMF' || data.keypress || data.dynamicdata?.dtmf) {
+        const key = String(data.dynamicdata?.dtmf || data.dynamicdata?.keypress || data.keypress || '')
+        if (key && key !== 'E') {
+          console.log(`[VoiceBox-IoT] 🎯 捕获到专家手机按键: [ ${key} ]`)
+          this.handleKeypressCallback(key, data)
+          return
+        }
       }
 
       // 3. 通话实时状态事件
       if (msgType === 'RealTimeState') {
-        console.log(`[VoiceBox-IoT] 📞 通话状态: ${data.message || ''}`)
+        const dynamicdata = data.dynamicdata || {}
+        const realtimestate = String(dynamicdata.realtimestate || dynamicdata.state || '').toLowerCase()
+        const stateMsg = String(data.message || dynamicdata.message || '')
+        console.log(`[VoiceBox-IoT] 📞 通话状态事件: realtimestate=${realtimestate}, message=${stateMsg}, raw=${JSON.stringify(dynamicdata)}`)
+
+        // 呼出中：按原厂规范下发 closeheadsettochannel_Multi 切换信道（启用硬件 DTMF 按键检测）
+        if (realtimestate === 'outgoing') {
+          console.log(`[VoiceBox-IoT] 🔌 正在下发 closeheadsettochannel_Multi 切换音频通道（启用 DTMF 采样）...`)
+          this.sendWsJson({
+            command: 'closeheadsettochannel_Multi',
+            arguments: { devicename: this.devicename }
+          })
+        }
+
+        // 呼入自动接听（方便用户主动拨打盒子测试语音）
+        if (realtimestate === 'incoming') {
+          console.log(`[VoiceBox-IoT] 📥 检测到电话呼入 (${dynamicdata.number || ''})，自动下发 Answer_Multi 接听测试...`)
+          this.sendWsJson({
+            command: 'Answer_Multi',
+            arguments: { devicename: this.devicename }
+          })
+          return
+        }
+
+        // 检测到接通（呼出接通 outconnected / 呼入接听 inconnected / connected / 包含接听），立即播放通知语音
+        if (
+          realtimestate === 'outconnected' ||
+          realtimestate === 'inconnected' ||
+          realtimestate === 'connected' ||
+          realtimestate === '4' ||
+          stateMsg.includes('接听') ||
+          stateMsg.includes('接通')
+        ) {
+          console.log(`[VoiceBox-IoT] 🔊 通话已接通 (${realtimestate})，立即向盒子下发 PlayStartRecord_Multi 播音指令...`)
+          this.playNoticeAudio()
+        }
         return
       }
 
@@ -194,12 +244,32 @@ class VoiceBoxService {
    * 按键业务回调处理：自动驱动数据库与状态变更
    */
   private async handleKeypressCallback(key: string, raw: any) {
-    const call = this.currentCall
     const cleanKey = key.trim()
-    console.log(`[VoiceBox-IoT] 执行专家按键判定逻辑: key=${cleanKey}, 当前呼叫:`, call)
+    console.log(`[VoiceBox-IoT] 执行专家按键判定逻辑: key=${cleanKey}, 当前呼叫:`, this.currentCall)
 
     // 无论按 1 还是 0，均立即挂断电话释放信道
     this.hangUp()
+
+    let call = this.currentCall
+    if (!call) {
+      console.warn('[VoiceBox-IoT] 收到按键回调，尝试匹配最近通知中的抽取记录...')
+      try {
+        const [latest] = await pool.query<RowDataPacket[]>(
+          `SELECT id, ei_phone FROM extract_rule_result WHERE notice_state = 1 ORDER BY last_update_time DESC, id DESC LIMIT 1`
+        )
+        if (latest && latest[0]) {
+          call = {
+            callId: `vb-fallback-${latest[0].id}`,
+            phone: latest[0].ei_phone,
+            extractRuleResultId: latest[0].id,
+            startTime: Date.now()
+          }
+          console.log('[VoiceBox-IoT] 成功匹配到最近待确认记录:', call)
+        }
+      } catch (err: any) {
+        console.warn('[VoiceBox-IoT] 匹配失败:', err.message)
+      }
+    }
 
     if (!call) {
       console.warn('[VoiceBox-IoT] 收到按键回调，但未匹配到正在进行的呼叫会话')
@@ -217,25 +287,23 @@ class VoiceBoxService {
       if (call.extractRuleResultId && participateState !== null) {
         await pool.query(
           `UPDATE extract_rule_result 
-           SET participate_state = ?, confirm_date = NOW() 
+           SET participate_state = ?, notice_state = 2, confirm_date = NOW() 
            WHERE id = ?`,
           [participateState, call.extractRuleResultId]
         )
 
-        // 若同意参加，锁定专家
-        if (isAgree) {
-          const [resRows] = await pool.query<RowDataPacket[]>(
-            `SELECT ei_id FROM extract_rule_result WHERE id = ?`,
-            [call.extractRuleResultId]
-          )
-          const eiId = resRows[0]?.ei_id
-          if (eiId) {
-            await pool.query(
-              `UPDATE expert_info_base SET is_locked = 1 WHERE id = ?`,
-              [eiId]
-            ).catch(e => console.warn('[VoiceBox-IoT] 锁定专家失败:', e.message))
-            console.log(`[VoiceBox-IoT] ✅ 专家 (ei_id=${eiId}) 已同意参加并成功锁定`)
-          }
+        // 同意参加：锁定专家 (字段为 if_lock)
+        const [resRows] = await pool.query<RowDataPacket[]>(
+          `SELECT ei_id FROM extract_rule_result WHERE id = ?`,
+          [call.extractRuleResultId]
+        )
+        const eiId = resRows[0]?.ei_id
+        if (eiId) {
+          await pool.query(
+            `UPDATE expert_info_base SET if_lock = ? WHERE id = ?`,
+            [isAgree ? 1 : 0, eiId]
+          ).catch(e => console.warn('[VoiceBox-IoT] 更新专家锁定状态失败:', e.message))
+          console.log(`[VoiceBox-IoT] ✅ 专家 (ei_id=${eiId}) 状态已更新为 if_lock=${isAgree ? 1 : 0}`)
         }
       }
 
@@ -258,7 +326,7 @@ class VoiceBoxService {
   /**
    * 发起拨号呼叫
    */
-  public async dial(phone: string, meta?: { extractRuleResultId?: number, callId?: string }): Promise<{ success: boolean, callId: string, message: string }> {
+  public async dial(phone: string, meta?: { extractRuleResultId?: number, callId?: string, audioUrl?: string }): Promise<{ success: boolean, callId: string, message: string }> {
     const cleanPhone = phone.replace(/^\+86/, '').trim()
     const callId = meta?.callId || `vb-${Date.now()}-${Math.floor(Math.random() * 10000)}`
 
@@ -274,6 +342,7 @@ class VoiceBoxService {
       callId,
       phone: cleanPhone,
       extractRuleResultId: meta?.extractRuleResultId,
+      audioUrl: meta?.audioUrl,
       startTime: Date.now()
     }
     this.currentCall = callMeta
@@ -281,6 +350,7 @@ class VoiceBoxService {
 
     console.log(`[VoiceBox-IoT] 📞 发起外呼: 手机号=${cleanPhone}, 设备号=${this.devicename}, callId=${callId}`)
 
+    // 1. 发起拨号呼叫
     const dialPayload = {
       command: 'Dial_Multi',
       arguments: {
@@ -296,6 +366,69 @@ class VoiceBoxService {
       callId,
       message: `已向语音盒子下发外呼指令 (${cleanPhone})`
     }
+  }
+
+  /**
+   * 触发语音盒子将通知音频下载至盒子内部本地存储 (/mnt/webaudiodownload/)
+   * 按照原工程标准参数: url, content, devicename
+   */
+  /**
+   * 触发语音盒子将通知音频下载至盒子内部存储 (/mnt/webaudiodownload/)
+   * 对齐原工程两阶段确认机制: audiodownload (content传MD5) -> 延时 -> CheckAudioDownload
+   */
+  public downloadNoticeAudio(customFileName = 'expert_notice.wav') {
+    const audioUrl = process.env.VOICEBOX_AUDIO_URL || 'http://192.168.2.1:8085/expert_notice.wav'
+    
+    // 计算本地音频文件 MD5 (原厂硬件固件校验规则)
+    let md5 = '4424b72e4797d8cd5b14b95cc6614193'
+    try {
+      const localFilePath = path.join(process.cwd(), 'uploads/audio', customFileName)
+      if (fs.existsSync(localFilePath)) {
+        const fileBuf = fs.readFileSync(localFilePath)
+        md5 = crypto.createHash('md5').update(fileBuf).digest('hex')
+      }
+    } catch (e: any) {
+      console.warn('[VoiceBox-IoT] 计算音频 MD5 异常:', e.message)
+    }
+
+    console.log(`[VoiceBox-IoT] 📥 1. 下发盒子内部音频下载指令: url=${audioUrl}, content(MD5)=${md5}`)
+    this.sendWsJson({
+      command: 'audiodownload',
+      arguments: {
+        url: audioUrl,
+        content: md5,
+        devicename: this.devicename
+      }
+    })
+
+    // 延时 4 秒后主动向盒子校验下载状态 CheckAudioDownload (原工程标准)
+    setTimeout(() => {
+      console.log(`[VoiceBox-IoT] 🔍 2. 下发 CheckAudioDownload 校验文件状态: content=${customFileName}`)
+      this.sendWsJson({
+        command: 'CheckAudioDownload',
+        arguments: {
+          content: customFileName,
+          devicename: this.devicename
+        }
+      })
+    }, 4000)
+  }
+
+  /**
+   * 接通后播放通知语音
+   * 盒子在收到 audiodownload 后保存在 /mnt/webaudiodownload/，此处 content 必须传文件名
+   */
+  private playNoticeAudio() {
+    console.log(`[VoiceBox-IoT] 🔊 发送播音指令: PlayStartRecord_Multi, devicename=${this.devicename}, content=expert_notice.wav`)
+
+    // 下发 PlayStartRecord_Multi 指令 (原系统标准指令，content 仅传文件名)
+    this.sendWsJson({
+      command: 'PlayStartRecord_Multi',
+      arguments: {
+        devicename: this.devicename,
+        content: 'expert_notice.wav'
+      }
+    })
   }
 
   /**

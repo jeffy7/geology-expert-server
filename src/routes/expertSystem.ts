@@ -1402,13 +1402,42 @@ router.post('/expertInfoBase/update', async (req, res) => {
     // 4. 若传入专业与职称绑定列表，更新 expert_info_major
     if (Array.isArray(majors)) {
       await pool.query('DELETE FROM expert_info_major WHERE CAST(ei_id AS CHAR) = ?', [String(id)])
+
+      // 预先获取字典映射
+      const [allRanks] = await pool.query<RowDataPacket[]>('SELECT id, rank_name FROM brace_rank')
+      const rankMap = new Map<string, string>()
+      allRanks.forEach(r => rankMap.set(r.rank_name, String(r.id)))
+
+      const [allMajors] = await pool.query<RowDataPacket[]>('SELECT id, major_name FROM brace_major')
+      const majorMap = new Map<string, string>()
+      allMajors.forEach(m => majorMap.set(m.major_name, String(m.id)))
+
       for (const m of majors) {
         if (!m.majorName) continue
         const mId = Date.now().toString() + Math.floor(Math.random() * 1000)
+
+        // 智能获取 rankCode，避免空字符串导致 bigint 报错
+        let rankCode = m.rankCode !== undefined && m.rankCode !== null ? String(m.rankCode).trim() : ''
+        if ((!rankCode || !/^\d+$/.test(rankCode)) && m.rankName && rankMap.has(m.rankName)) {
+          rankCode = rankMap.get(m.rankName)!
+        }
+        if (!rankCode || !/^\d+$/.test(rankCode)) {
+          rankCode = '0'
+        }
+
+        // 智能获取 majorCode
+        let majorCode = m.majorCode !== undefined && m.majorCode !== null ? String(m.majorCode).trim() : ''
+        if (!majorCode && m.majorName && majorMap.has(m.majorName)) {
+          majorCode = majorMap.get(m.majorName)!
+        }
+        if (!majorCode) {
+          majorCode = '0'
+        }
+
         await pool.query(
           `INSERT INTO expert_info_major (id, ei_id, major_code, rank_code, major_name, rank_name, insert_time)
            VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [mId, String(id), m.majorCode || '', m.rankCode || '', m.majorName, m.rankName || '']
+          [mId, String(id), majorCode, rankCode, m.majorName, m.rankName || '']
         )
       }
     }

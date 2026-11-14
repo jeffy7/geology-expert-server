@@ -126,7 +126,9 @@
     ws.onopen = () => {
       dotEl.style.background = '#10b981';
       statusText.innerText = '✅ 已成功连接语音盒子 (192.168.2.4:8555)';
-      log('✅ WebSocket 连接成功！正在下发 OpenDevice_Multi 初始化设备...');
+      log('✅ WebSocket 连接成功！正在清理旧连接并初始化设备...');
+      // 官方命令：关闭非当前旧连接，避免 DTMF 事件被旧连接截获
+      ws.send(JSON.stringify({ command: 'CloseOldWs' }));
       ws.send(JSON.stringify({ command: 'OpenDevice_Multi' }));
     };
 
@@ -140,7 +142,22 @@
           if (data.devicename) {
             document.getElementById('devicename').value = data.devicename;
           }
-          log(`🎉 硬件设备初始化完毕，设备号: ${data.devicename || 'EV982EEA9821560762'}`);
+          const dev = document.getElementById('devicename').value.trim();
+          log(`🎉 硬件设备初始化完毕，设备号: ${dev}`);
+
+          // 开启详细调试上报与 4G 模组 DTMF 硬件解调
+          ws.send(JSON.stringify({
+            command: 'SpecialCallStateEnable_Multi',
+            arguments: { devicename: dev, content: '1' }
+          }));
+          ws.send(JSON.stringify({
+            command: 'AT_Multi',
+            arguments: { devicename: dev, content: 'AT+QTONEDET=1' }
+          }));
+          ws.send(JSON.stringify({
+            command: 'GetVolte_Multi',
+            arguments: { devicename: dev }
+          }));
         }
 
         // 2. 音频下载回包
@@ -163,6 +180,23 @@
           log(`🔍 文件校验结果: state=${data.data?.state}, msg=${data.message || ''}`);
         }
 
+        // 3.5 捕获放音状态 (PlayState) 并恢复正常双向通话信道
+        if (data.type === 'PlayState') {
+          const dyn = data.dynamicdata || {};
+          const isPlaying = String(dyn.isplaying) === 'true';
+          const filename = dyn.filename || '';
+          if (isPlaying) {
+            log(`▶️ 语音文件 [ ${filename} ] 正在远端播放中...`);
+          } else {
+            log(`⏹ 语音文件 [ ${filename} ] 播放完毕！立即切回双向通话信道 (openheadsettochannel_Multi)，监听专家手机按键...`);
+            const dev = document.getElementById('devicename').value.trim();
+            ws.send(JSON.stringify({
+              command: 'openheadsettochannel_Multi',
+              arguments: { devicename: dev }
+            }));
+          }
+        }
+
         // 4. 识别按键事件 (DTMF)
         if (data.type === 'DTMF' || data.keypress || data.dynamicdata?.dtmf) {
           const key = String(data.dynamicdata?.dtmf || data.dynamicdata?.keypress || data.keypress || '');
@@ -182,15 +216,6 @@
           const dyn = data.dynamicdata || {};
           const state = String(dyn.realtimestate || dyn.state || data.message || '');
           log(`📡 通话状态变化: state=${state}, 详情: ${JSON.stringify(dyn)}`);
-
-          // 呼出中：下发 closeheadsettochannel_Multi 切换信道（原厂规范，启用硬件 DTMF 按键解码）
-          if (state === 'outgoing') {
-            log('🔌 正在下发 closeheadsettochannel_Multi 切换音频通道（启用 DTMF 按键采样）...');
-            ws.send(JSON.stringify({
-              command: 'closeheadsettochannel_Multi',
-              arguments: { devicename: document.getElementById('devicename').value.trim() }
-            }));
-          }
 
           // 呼入自动接听测试
           if (state === 'incoming') {
@@ -266,10 +291,15 @@
     ws.send(JSON.stringify(payload));
   }
 
-  // 3. 播放录音
+  // 3. 播放录音 (遵循看云文档 2684900 放音规范)
   function playAudioDirect() {
     const devicename = document.getElementById('devicename').value.trim();
     const content = document.getElementById('audioContent').value.trim();
+    // 官方时序：放音前切换到电脑放音
+    ws.send(JSON.stringify({
+      command: 'closeheadsettochannel_Multi',
+      arguments: { devicename }
+    }));
     const payload = {
       command: 'PlayStartRecord_Multi',
       arguments: { devicename, content }
@@ -287,6 +317,11 @@
     };
     log(`⏹ 正在下发 PlayStopRecord_Multi 停止播音指令 -> ${JSON.stringify(payload)}`);
     ws.send(JSON.stringify(payload));
+    // 官方时序：停止放音后切回正常双向通话
+    ws.send(JSON.stringify({
+      command: 'openheadsettochannel_Multi',
+      arguments: { devicename }
+    }));
   }
 
   // 5. 拨号呼出

@@ -635,6 +635,36 @@ router.get('/expertInfoBase/allEntName', (req, res) => {
   }
 })
 
+// 14.1 专家名录导入模板下载 GET /etbApi/expert-system/expertInfoBase/template
+router.get('/expertInfoBase/template', (_req, res) => {
+  try {
+    const customTemplatePath = path.join(uploadDir, 'templates/expert_import_template.xlsx')
+    if (fs.existsSync(customTemplatePath)) {
+      return res.download(customTemplatePath, '评审专家名录导入模板.xlsx')
+    }
+
+    // 逆向源码标准 20 列表头 (带 UTF-8 BOM 防 Excel 乱码)
+    const headers = [
+      '专家姓名', '专家性别', '手机号', '专家身份证号', '所属单位',
+      '单位统一社会信用代码', '所属地区', '所属专业', '职称', '申请方式',
+      '推荐人姓名', '推荐人身份证号', '推荐人联系电话', '推荐企业名称',
+      '推荐企业统一社会信用代码', '企业联系电话', '是否组长', '是否退休', '学历', '所学专业'
+    ]
+    const sampleRow = [
+      '张建国', '男', '13947188001', '15010219780101221X', '内蒙古地质矿产勘查有限责任公司',
+      '91150100XXXXXXXXXX', '内蒙古自治区-呼和浩特市', '矿产地质勘查', '正高级工程师', '单位推荐',
+      '李四', '150102197501015678', '13900139000', '自治区地质矿产集团',
+      '91150000XXXXXXXXXX', '0471-1234567', '否', '否', '大学本科', '地质矿产'
+    ]
+    const csvContent = '\uFEFF' + headers.join(',') + '\n' + sampleRow.join(',') + '\n'
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename=' + encodeURIComponent('评审专家名录导入模板.csv'))
+    res.send(csvContent)
+  } catch (error: any) {
+    res.status(500).json(errorResponse('下载模板失败: ' + error.message))
+  }
+})
+
 router.get('/expertInfoBase/:id', async (req, res) => {
   try {
     const id = req.params.id
@@ -658,9 +688,7 @@ router.get('/expertInfoBase/:id', async (req, res) => {
         study_major as studyMajor,
         study_major_name as studyMajorName,
         degree,
-        degree_name as degreeName,
-        '正高级工程师' as rankName,
-        '矿产地质勘查' as majorText
+        degree_name as degreeName
        FROM expert_info_base
        WHERE CAST(id AS CHAR) = ?`,
       [id]
@@ -671,11 +699,6 @@ router.get('/expertInfoBase/:id', async (req, res) => {
     }
 
     const expert = rows[0]
-    // 补齐默认回显展示字段
-    if (!expert.areaText) expert.areaText = '内蒙古自治区-包头市'
-    if (!expert.studyMajorName) expert.studyMajorName = '资源勘查工程'
-    if (!expert.degreeName) expert.degreeName = '本科'
-    if (!expert.entCode) expert.entCode = '91150291692885638T'
 
     // 查询专业与职称关联
     const [majors] = await pool.query<RowDataPacket[]>(
@@ -685,8 +708,8 @@ router.get('/expertInfoBase/:id', async (req, res) => {
         m.major_code as majorCode,
         CAST(m.rank_code AS CHAR) as rankCode,
         CAST(m.rank_code AS CHAR) as rankCodeStr,
-        IFNULL(m.major_name, IFNULL(bm.major_name, '地质矿产')) as majorName,
-        IFNULL(m.rank_name, IFNULL(r.rank_name, '高级')) as rankName
+        IFNULL(m.major_name, bm.major_name) as majorName,
+        IFNULL(m.rank_name, r.rank_name) as rankName
        FROM expert_info_major m
        LEFT JOIN brace_rank r ON CAST(m.rank_code AS CHAR) = CAST(r.id AS CHAR)
        LEFT JOIN brace_major bm ON CAST(m.major_code AS CHAR) = CAST(bm.id AS CHAR)
@@ -939,7 +962,10 @@ router.get('/expertInfoAlter/:id', async (req, res) => {
     let diffInfos: any[] = []
 
     try {
-      if (row.beforeChange) {
+      // 优先取修改后（最新）快照，使详情卡片展示变更生效后的真实基本信息
+      if (row.afterChange) {
+        baseInfo = JSON.parse(row.afterChange)
+      } else if (row.beforeChange) {
         baseInfo = JSON.parse(row.beforeChange)
       }
     } catch (e) {
@@ -1380,7 +1406,7 @@ router.post('/expertInfoBase/update', async (req, res) => {
         await pool.query(
           `INSERT INTO expert_info_major (id, ei_id, major_code, rank_code, major_name, rank_name, insert_time)
            VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [mId, String(id), m.majorCode || 'A-A06', m.rankCode || '3', m.majorName, m.rankName || '高级']
+          [mId, String(id), m.majorCode || '', m.rankCode || '', m.majorName, m.rankName || '']
         )
       }
     }
@@ -1400,8 +1426,8 @@ router.post('/expertInfoBase/update', async (req, res) => {
         entCode: old.ent_code || '-',
         areaCode: old.area_code || '',
         areaText: old.area_text || '-',
-        majorListStr: oldMajorStr || '矿产地质勘查',
-        rankListStr: oldRankStr || '高级工程师',
+        majorListStr: oldMajorStr || '-',
+        rankListStr: oldRankStr || '-',
         learnMajor: old.study_major_name || '-',
         edu: old.degree_name || '-',
         isLeader: old.leader ?? 0,
@@ -1449,36 +1475,6 @@ router.post('/expertInfoBase/update', async (req, res) => {
   }
 })
 
-// 15.1 专家名录导入模板下载 GET /etbApi/expert-system/expertInfoBase/template
-router.get('/expertInfoBase/template', (_req, res) => {
-  try {
-    const customTemplatePath = path.join(uploadDir, 'templates/expert_import_template.xlsx')
-    if (fs.existsSync(customTemplatePath)) {
-      return res.download(customTemplatePath, '评审专家名录导入模板.xlsx')
-    }
-
-    // 逆向源码标准 20 列表头 (带 UTF-8 BOM 防 Excel 乱码)
-    const headers = [
-      '专家姓名', '专家性别', '手机号', '专家身份证号', '所属单位',
-      '单位统一社会信用代码', '所属地区', '所属专业', '职称', '申请方式',
-      '推荐人姓名', '推荐人身份证号', '推荐人联系电话', '推荐企业名称',
-      '推荐企业统一社会信用代码', '企业联系电话', '是否组长', '是否退休', '学历', '所学专业'
-    ]
-    const sampleRow = [
-      '张建国', '男', '13947188001', '15010219780101221X', '内蒙古地质矿产勘查有限责任公司',
-      '91150100XXXXXXXXXX', '内蒙古自治区-呼和浩特市', '矿产地质勘查', '正高级工程师', '单位推荐',
-      '李四', '150102197501015678', '13900139000', '自治区地质矿产集团',
-      '91150000XXXXXXXXXX', '0471-1234567', '否', '否', '大学本科', '地质矿产'
-    ]
-    const csvContent = '\uFEFF' + headers.join(',') + '\n' + sampleRow.join(',') + '\n'
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader('Content-Disposition', 'attachment; filename=' + encodeURIComponent('评审专家名录导入模板.csv'))
-    res.send(csvContent)
-  } catch (error: any) {
-    res.status(500).json(errorResponse('下载模板失败: ' + error.message))
-  }
-})
-
 // 16. 专家管理员 - 批量导入专家名录 POST /etbApi/expert-system/expertInfoBase/import
 router.post('/expertInfoBase/import', upload.single('file'), async (req, res) => {
   try {
@@ -1515,9 +1511,9 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
 
             await pool.query(
               `INSERT INTO expert_info_base (
-                id, ei_name, sex, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, insert_time
-              ) VALUES (?, ?, ?, ?, ?, ?, 95, '甲', 0, 0, 0, 2, NOW())`,
-              [newId, eiName, sex, phone, idNumber, entName]
+                id, ei_name, sex, phone, account, password, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, audit_state, source_type, insert_time
+              ) VALUES (?, ?, ?, ?, ?, 'z123456', ?, ?, 95, '甲', 0, 0, 0, 2, 1, 2, NOW())`,
+              [newId, eiName, sex, phone, phone, idNumber, entName]
             )
             importedCount++
           }
@@ -1528,8 +1524,8 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
         const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
         await pool.query(
           `INSERT INTO expert_info_base (
-            id, ei_name, sex, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, insert_time
-          ) VALUES (?, ?, 1, '13947188000', '150102198001010000', '自治区自然资源专家库', 95, '甲', 0, 0, 0, 2, NOW())`,
+            id, ei_name, sex, phone, account, password, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, audit_state, source_type, insert_time
+          ) VALUES (?, ?, 1, '13947188000', '13947188000', 'z123456', '150102198001010000', '自治区自然资源专家库', 95, '甲', 0, 0, 0, 2, 1, 2, NOW())`,
           [newId, originalName || '导入专家']
         )
         importedCount = 1
@@ -1546,11 +1542,12 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
       for (const item of expertList) {
         if (!item.name) continue
         const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
+        const phone = item.phone || '13800000000'
         await pool.query(
           `INSERT INTO expert_info_base (
-            id, ei_name, sex, phone, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, insert_time
-          ) VALUES (?, ?, 1, ?, ?, ?, 95, '甲', 0, 0, 0, 2, NOW())`,
-          [newId, item.name, item.phone || '13800000000', item.idNumber || '150101198001010000', item.entName || '自治区地质矿产集团']
+            id, ei_name, sex, phone, account, password, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, audit_state, source_type, insert_time
+          ) VALUES (?, ?, 1, ?, ?, 'z123456', ?, ?, 95, '甲', 0, 0, 0, 2, 1, 2, NOW())`,
+          [newId, item.name, phone, phone, item.idNumber || '150101198001010000', item.entName || '自治区地质矿产集团']
         )
         importedCount++
       }

@@ -180,7 +180,7 @@
           log(`🔍 文件校验结果: state=${data.data?.state}, msg=${data.message || ''}`);
         }
 
-        // 3.5 捕获放音状态 (PlayState) 并恢复正常双向通话信道
+        // 3.5 捕获放音状态 (PlayState) 并恢复正常双向通话信道 (文档1806092双向开关规范)
         if (data.type === 'PlayState') {
           const dyn = data.dynamicdata || {};
           const isPlaying = String(dyn.isplaying) === 'true';
@@ -188,10 +188,16 @@
           if (isPlaying) {
             log(`▶️ 语音文件 [ ${filename} ] 正在远端播放中...`);
           } else {
-            log(`⏹ 语音文件 [ ${filename} ] 播放完毕！立即切回双向通话信道 (openheadsettochannel_Multi)，监听专家手机按键...`);
+            log(`⏹ 语音文件 [ ${filename} ] 播放完毕！立即切回双向通话信道 (打开设备到手机、手机到设备双向开关)，监听专家手机按键...`);
             const dev = document.getElementById('devicename').value.trim();
+            // 开关1：本地耳机到远端手机 (设备 -> 手机)
             ws.send(JSON.stringify({
               command: 'openheadsettochannel_Multi',
+              arguments: { devicename: dev }
+            }));
+            // 开关2：远端手机到本地设备 (手机 -> 设备，手机DTMF上行必需)
+            ws.send(JSON.stringify({
+              command: 'openchanneltoheadset_Multi',
               arguments: { devicename: dev }
             }));
           }
@@ -317,9 +323,13 @@
     };
     log(`⏹ 正在下发 PlayStopRecord_Multi 停止播音指令 -> ${JSON.stringify(payload)}`);
     ws.send(JSON.stringify(payload));
-    // 官方时序：停止放音后切回正常双向通话
+    // 官方时序：停止放音后切回正常双向通话 (文档1806092双向开关规范)
     ws.send(JSON.stringify({
       command: 'openheadsettochannel_Multi',
+      arguments: { devicename }
+    }));
+    ws.send(JSON.stringify({
+      command: 'openchanneltoheadset_Multi',
       arguments: { devicename }
     }));
   }

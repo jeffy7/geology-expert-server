@@ -53,7 +53,7 @@ class NoticeQueueService {
         FROM notice_expert_callback GROUP BY extrace_rule_result_id
       ) c ON r.id = c.extrace_rule_result_id
       WHERE (r.project_id = ? OR r.rule_id = ?) 
-        AND (r.participate_state IS NULL OR r.participate_state = 0)
+        AND r.participate_state IS NULL
         AND (r.avoidance_flag IS NULL OR r.avoidance_flag = 0)
     `
     if (groupId === '1' || groupId.includes('leader')) {
@@ -202,20 +202,32 @@ class NoticeQueueService {
       const rId = String(ruleId)
       console.log(`[NoticeQueue] 🔍 正在执行组完成度核查: projectId=${pId}, ruleId=${rId}, groupId=${groupId}`)
 
-      // 1. 读取规则快照中的目标人数
+      // 1. 读取规则条件中的真实目标人数 (以数据库实际设定为准，杜绝硬编码)
       let leaderNum = 1
-      let memberNum = 4
-      const [snaps] = await pool.query<RowDataPacket[]>(
-        `SELECT rule_snapshot FROM extract_rule_snapshot WHERE rule_id = ? ORDER BY id DESC LIMIT 1`,
+      let memberNum = 1
+      const [condRows] = await pool.query<RowDataPacket[]>(
+        `SELECT 
+          COALESCE(SUM(CASE WHEN condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%' THEN extract_num ELSE 0 END), 0) as leaderTarget,
+          COALESCE(SUM(CASE WHEN condition_key NOT LIKE '%leader%' AND condition_key NOT LIKE '%Leader%' THEN extract_num ELSE 0 END), 0) as memberTarget
+         FROM extract_rule_condition WHERE rule_id = ?`,
         [rId]
       )
-      if (snaps[0]?.rule_snapshot) {
-        try {
-          const parsed = typeof snaps[0].rule_snapshot === 'string' ? JSON.parse(snaps[0].rule_snapshot) : snaps[0].rule_snapshot
-          if (parsed.leaderNum) leaderNum = Number(parsed.leaderNum)
-          if (parsed.memberNum) memberNum = Number(parsed.memberNum)
-          else if (parsed.totalExpertNum) memberNum = Number(parsed.totalExpertNum) - leaderNum
-        } catch (_) {}
+      if (condRows[0] && (Number(condRows[0].leaderTarget) > 0 || Number(condRows[0].memberTarget) > 0)) {
+        if (Number(condRows[0].leaderTarget) > 0) leaderNum = Number(condRows[0].leaderTarget)
+        if (Number(condRows[0].memberTarget) > 0) memberNum = Number(condRows[0].memberTarget)
+      } else {
+        const [snaps] = await pool.query<RowDataPacket[]>(
+          `SELECT rule_snapshot FROM extract_rule_apply_snapshot WHERE rule_id = ? ORDER BY id DESC LIMIT 1`,
+          [rId]
+        )
+        if (snaps[0]?.rule_snapshot) {
+          try {
+            const parsed = typeof snaps[0].rule_snapshot === 'string' ? JSON.parse(snaps[0].rule_snapshot) : snaps[0].rule_snapshot
+            if (parsed.leaderNum) leaderNum = Number(parsed.leaderNum)
+            if (parsed.memberNum) memberNum = Number(parsed.memberNum)
+            else if (parsed.totalExpertNum) memberNum = Number(parsed.totalExpertNum) - leaderNum
+          } catch (_) {}
+        }
       }
 
       // 2. 查询当前已确认人数 (participate_state = 1)
@@ -235,28 +247,32 @@ class NoticeQueueService {
 
       console.log(`[NoticeQueue] 📊 核查统计: 组长目标=${leaderNum}, 已同意=${confirmedLeader} | 组员目标=${memberNum}, 已同意=${confirmedMember}`)
 
+      const isLeaderSatisfied = confirmedLeader >= leaderNum
+      const isMemberSatisfied = confirmedMember >= memberNum
+
       if (groupId === '1') {
-        if (confirmedLeader >= leaderNum) {
+        if (isLeaderSatisfied) {
           console.log(`[NoticeQueue] ✅ 评审组长已确认同意参会！状态流转为 23 (LEADER_EXTRACTING_NOTICE_DONE_AND_SATISFIED)`)
-          await pool.query(`UPDATE extract_rule SET extracting_state = 23 WHERE id = ?`, [rId])
+          await pool.query(`UPDATE extract_rule SET extracting_state = 23 WHERE CAST(id AS CHAR) = ? OR id = ?`, [rId, rId]).catch(() => {})
         } else {
           console.warn(`[NoticeQueue] ⚠️ 评审组长通知完毕但不满足！状态流转为 24 (LEADER_EXTRACTING_NOTICE_DONE_BUT_NOT_SATISFIED)`)
-          await pool.query(`UPDATE extract_rule SET extracting_state = 24 WHERE id = ?`, [rId])
+          await pool.query(`UPDATE extract_rule SET extracting_state = 24 WHERE CAST(id AS CHAR) = ? OR id = ?`, [rId, rId]).catch(() => {})
         }
       } else {
-        if (confirmedMember >= memberNum) {
+        if (isMemberSatisfied) {
           console.log(`[NoticeQueue] ✅ 评审组员已全额同意参会！状态流转为 231 (CREW_EXTRACTING_NOTICE_DONE_AND_SATISFIED)`)
-          await pool.query(`UPDATE extract_rule SET extracting_state = 231 WHERE id = ?`, [rId])
-          if (confirmedLeader >= leaderNum) {
-            // 全员满足，项目完成抽取
-            console.log(`[NoticeQueue] 🏆 全项目专家确认完毕，抽取圆满成功！extract_state = 2`)
-            await pool.query(`UPDATE extract_rule SET extract_state = 2 WHERE id = ?`, [rId])
-            await pool.query(`UPDATE project SET extract_state = 2 WHERE id = ?`, [pId])
-          }
+          await pool.query(`UPDATE extract_rule SET extracting_state = 231 WHERE CAST(id AS CHAR) = ? OR id = ?`, [rId, rId]).catch(() => {})
         } else {
           console.warn(`[NoticeQueue] ⚠️ 评审组员通知完毕但不满足！缺额 ${memberNum - confirmedMember} 人，状态流转为 241 (CREW_EXTRACTING_NOTICE_DONE_BUT_NOT_SATISFIED)`)
-          await pool.query(`UPDATE extract_rule SET extracting_state = 241 WHERE id = ?`, [rId])
+          await pool.query(`UPDATE extract_rule SET extracting_state = 241 WHERE CAST(id AS CHAR) = ? OR id = ?`, [rId, rId]).catch(() => {})
         }
+      }
+
+      // 只要组长和组员同时全部达到目标人数，项目即刻圆满完成抽取！
+      if (isLeaderSatisfied && isMemberSatisfied) {
+        console.log(`[NoticeQueue] 🏆 全项目专家确认完毕(组长=${confirmedLeader}/${leaderNum}, 组员=${confirmedMember}/${memberNum})，抽取圆满成功！更新 extract_state = 2`)
+        await pool.query(`UPDATE extract_rule SET extract_state = 2, complete_extract_time = NOW() WHERE CAST(id AS CHAR) = ? OR id = ?`, [rId, rId])
+        await pool.query(`UPDATE project SET extract_state = 2 WHERE CAST(id AS CHAR) = ? OR id = ?`, [pId, pId])
       }
     } catch (e: any) {
       console.error('[NoticeQueue] 组完成度核查异常:', e.message)

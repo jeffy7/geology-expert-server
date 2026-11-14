@@ -292,9 +292,9 @@ class VoiceBoxService {
   }
 
   /**
-   * 按键业务回调处理：自动驱动数据库与状态变更
+   * 按键业务回调处理：自动驱动数据库与状态变更 (公有供 WebSocket、外部回调与本地模拟调用)
    */
-  private async handleKeypressCallback(key: string, raw: any) {
+  public async handleKeypressCallback(key: string, raw: any = {}) {
     const cleanKey = key.trim()
     console.log(`[VoiceBox-IoT] 执行专家按键判定逻辑: key=${cleanKey}, 当前呼叫:`, this.currentCall)
 

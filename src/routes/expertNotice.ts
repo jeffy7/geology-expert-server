@@ -279,7 +279,34 @@ router.post('/test-call', async (req, res) => {
   }
 })
 
-// 11. 语音设备按键/结果回调接口 POST /etbApi/expert-notice/callback
+// 11. 模拟专家手机按键快捷联调接口 POST /etbApi/expert-notice/simulate-keypress
+router.post('/simulate-keypress', async (req, res) => {
+  try {
+    const { keypress = '1', key = '1', projectId, ruleId } = req.body || {}
+    const k = String(keypress || key || '1').trim()
+    console.log(`[expert-notice] 收到本地联调模拟按键: key=${k}`)
+    await voiceBoxService.handleKeypressCallback(k, { simulated: true })
+
+    // 联动触发完成度核查，确保满足目标人数时自动流转为已完成 (extract_state = 2)
+    let pId = projectId
+    let rId = ruleId
+    if (!pId || !rId) {
+      const [latest] = await pool.query<RowDataPacket[]>(
+        `SELECT project_id, rule_id FROM extract_rule_result WHERE notice_state IN (1, 2) ORDER BY last_update_time DESC, id DESC LIMIT 1`
+      )
+      pId = latest[0]?.project_id
+      rId = latest[0]?.rule_id
+    }
+    if (pId && rId) {
+      await noticeQueueService.checkGroupCompletion(pId, rId, '2')
+    }
+    res.json(successResponse(null, `已模拟专家手机按键【${k}】(${k === '1' ? '确认同意参会' : '放弃评审参会'})`))
+  } catch (err: any) {
+    res.status(500).json(errorResponse('模拟按键异常: ' + err.message))
+  }
+})
+
+// 12. 语音设备按键/结果回调接口 POST /etbApi/expert-notice/callback
 router.post('/callback', async (req, res) => {
   try {
     const payload = req.body || {}
@@ -288,6 +315,10 @@ router.post('/callback', async (req, res) => {
     const callId = payload.callId || payload.callid || payload.voiceId
     const mobile = payload.mobile || payload.calledNumber || payload.phone
     const keypress = payload.keypress || payload.keyPress || payload.digit || (payload.voicekeyCallback && payload.voicekeyCallback.keypress)
+
+    if (keypress) {
+      await voiceBoxService.handleKeypressCallback(String(keypress), payload).catch(() => {})
+    }
 
     if (callId || mobile) {
       const isAgree = String(keypress) === '1'

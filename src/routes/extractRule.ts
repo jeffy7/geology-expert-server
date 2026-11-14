@@ -409,6 +409,18 @@ router.post('/extractRule/save', async (req, res) => {
     }
 
     // 3. 构造草稿快照存入 extract_rule_snapshot 表
+    let memberNum = 1
+    if (Array.isArray(memberMajors) && memberMajors.length > 0) {
+      memberNum = memberMajors.reduce((sum: number, m: any) => sum + Number(m.num || 0), 0)
+    } else if (crewNum !== undefined && crewNum !== null) {
+      memberNum = Number(crewNum)
+    } else if (totalExpertNum !== undefined) {
+      memberNum = Math.max(0, Number(totalExpertNum) - Number(leaderNum || 0))
+    }
+    const finalAvoidDays = avoidDays !== undefined && avoidDays !== '' ? avoidDays : 2
+    const finalMaxExtract = maxExtractCount !== undefined && maxExtractCount !== '' ? maxExtractCount : 2
+    const conditionText = `${finalAvoidDays} 天内被抽中且同意参与的专家不再被抽中；1 个月内被抽中且同意参与超过 ${finalMaxExtract} 次的专家不能被抽中`
+
     const snapshotData = {
       projectId,
       ruleId: effectiveRuleId,
@@ -418,9 +430,11 @@ router.post('/extractRule/save', async (req, res) => {
       leaderMajor,
       leaderArea,
       leaderNum,
+      memberNum,
       memberMajors,
-      avoidDays,
-      maxExtractCount,
+      avoidDays: finalAvoidDays,
+      maxExtractCount: finalMaxExtract,
+      conditionText,
       avoidUnits,
       avoidExpertIds,
       avoidExperts,
@@ -571,6 +585,18 @@ router.post('/extractRule/submitAudit', async (req, res) => {
     }
 
     // 4. 组装送审快照写入 extract_rule_snapshot
+    let memberNum = 1
+    if (Array.isArray(memberMajors) && memberMajors.length > 0) {
+      memberNum = memberMajors.reduce((sum: number, m: any) => sum + Number(m.num || 0), 0)
+    } else if (crewNum !== undefined && crewNum !== null) {
+      memberNum = Number(crewNum)
+    } else if (totalExpertNum !== undefined) {
+      memberNum = Math.max(0, Number(totalExpertNum) - Number(leaderNum || 0))
+    }
+    const finalAvoidDays = avoidDays !== undefined && avoidDays !== '' ? avoidDays : 2
+    const finalMaxExtract = maxExtractCount !== undefined && maxExtractCount !== '' ? maxExtractCount : 2
+    const conditionText = `${finalAvoidDays} 天内被抽中且同意参与的专家不再被抽中；1 个月内被抽中且同意参与超过 ${finalMaxExtract} 次的专家不能被抽中`
+
     const ruleSnapshot = {
       projectId,
       ruleId: effectiveRuleId,
@@ -580,9 +606,11 @@ router.post('/extractRule/submitAudit', async (req, res) => {
       leaderMajor,
       leaderArea,
       leaderNum,
+      memberNum,
       memberMajors,
-      avoidDays,
-      maxExtractCount,
+      avoidDays: finalAvoidDays,
+      maxExtractCount: finalMaxExtract,
+      conditionText,
       avoidUnits,
       avoidExpertIds,
       avoidExperts,
@@ -678,6 +706,18 @@ const handleCoreExtract = async (req: any, res: any) => {
         snapshot = typeof snaps[0].rule_snapshot === 'string' ? JSON.parse(snaps[0].rule_snapshot) : snaps[0].rule_snapshot
       } catch (_) {}
     }
+    // 若补抽无独立快照，继承同项目历史抽取的规则快照
+    if (!snapshot && pId) {
+      const [pSnaps] = await pool.query<RowDataPacket[]>(
+        `SELECT rule_snapshot FROM extract_rule_snapshot WHERE project_id = ? ORDER BY id DESC LIMIT 1`,
+        [pId]
+      )
+      if (pSnaps[0]?.rule_snapshot) {
+        try {
+          snapshot = typeof pSnaps[0].rule_snapshot === 'string' ? JSON.parse(pSnaps[0].rule_snapshot) : pSnaps[0].rule_snapshot
+        } catch (_) {}
+      }
+    }
 
     // 3. 构建回避与候选人过滤名单
     // 3.1 排除本项目已抽取的专家
@@ -715,12 +755,65 @@ const handleCoreExtract = async (req: any, res: any) => {
     }
 
     // 4. 组装抽取目标组与人数
-    const needLeader = !groupId || groupId === '1'
-    const needMember = !groupId || groupId === '2'
+    const isSupplement = rule.event_type === 2
+    let needLeader = !groupId || groupId === '1'
+    let needMember = !groupId || groupId === '2'
 
-    const leaderNum = Number(snapshot?.leaderNum || 1)
+    let leaderNum = Number(snapshot?.leaderNum || 1)
     const leaderMajor = snapshot?.leaderMajor || ''
+    const leaderArea = snapshot?.leaderArea || ''
     const memberMajors: any[] = snapshot?.memberMajors || [{ major: '地质矿产', num: 4 }]
+    let suppMissingMember = 0
+
+    if (isSupplement) {
+      // 查找本项目下所有被回避的专家
+      const [avoidedList] = await pool.query<RowDataPacket[]>(
+        `SELECT condition_key, IF(condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%', 1, 2) as leader
+         FROM extract_rule_result WHERE CAST(project_id AS CHAR) = ? AND avoidance_flag = 1`,
+        [String(pId)]
+      )
+      // 查找本次补抽已抽出的专家
+      const [curSuppList] = await pool.query<RowDataPacket[]>(
+        `SELECT condition_key, IF(condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%', 1, 2) as leader
+         FROM extract_rule_result WHERE CAST(project_id AS CHAR) = ? AND CAST(rule_id AS CHAR) = ?`,
+        [String(pId), String(ruleId)]
+      )
+
+      const avoidLeaderCnt = avoidedList.filter(r => r.leader === 1).length
+      const avoidMemberCnt = avoidedList.filter(r => r.leader === 2).length
+
+      const suppLeaderCnt = curSuppList.filter(r => r.leader === 1).length
+      const suppMemberCnt = curSuppList.filter(r => r.leader === 2).length
+
+      const needSuppLeader = Math.max(0, avoidLeaderCnt - suppLeaderCnt)
+      const needSuppMember = Math.max(0, avoidMemberCnt - suppMemberCnt)
+
+      needLeader = needSuppLeader > 0
+      leaderNum = needSuppLeader
+      needMember = needSuppMember > 0
+      suppMissingMember = needSuppMember
+
+      // 若都为0且尚未补抽过任何专家，默认补抽 1 位回避角色的专家
+      if (!needLeader && !needMember && curSuppList.length === 0) {
+        if (avoidLeaderCnt > 0) {
+          needLeader = true
+          leaderNum = 1
+        } else {
+          needMember = true
+          suppMissingMember = 1
+        }
+      }
+    }
+
+    const getMajorLabel = (m: string) => {
+      const dict: Record<string, string> = {
+        'A-A01': '地质矿产（煤炭）', 'A01': '地质矿产（煤炭）',
+        'A-A02': '地质矿产（煤层气）', 'A02': '地质矿产（煤层气）',
+        'A-A03': '地质矿产（金属）', 'A03': '地质矿产（金属）',
+        'A-A04': '地质矿产（非金属）', 'A04': '地质矿产（非金属）',
+      }
+      return dict[m] || m || '评审专家'
+    }
 
     const newlyExtractedResults: any[] = []
     const now = new Date()
@@ -739,8 +832,19 @@ const handleCoreExtract = async (req: any, res: any) => {
           return res.json({ code: -1, msg: '评审组长已确认同意参会，无需补抽！' })
         }
       } else {
-        let leaderWhere = `${baseWhere}`
+        let leaderWhere = `${baseWhere} AND b.leader = 1`
         const leaderParams = [...baseParams]
+
+        // 地区精确/前缀过滤 (对齐原系统 chooseExpertParam.areaCodeList)
+        const areaCodes = Array.isArray(leaderArea) ? leaderArea : [leaderArea].filter(Boolean)
+        const validAreaCodes = areaCodes.filter(a => a && a !== 'A' && a !== '内蒙古自治区' && a !== '不限地区')
+        if (validAreaCodes.length > 0) {
+          const areaClauses = validAreaCodes.map(() => `(b.area_code LIKE ? OR b.area_text LIKE ?)`).join(' OR ')
+          leaderWhere += ` AND (${areaClauses})`
+          validAreaCodes.forEach(a => {
+            leaderParams.push(`${a}%`, `%${a}%`)
+          })
+        }
 
         if (leaderMajor) {
           leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
@@ -757,23 +861,11 @@ const handleCoreExtract = async (req: any, res: any) => {
           [...leaderParams, leaderNum]
         )
 
-        if (leaderCandidates.length < leaderNum) {
-          // Fallback: 放宽专业精确匹配，确保项目能正常抽取
-          const [fallbackLeaders] = await pool.query<RowDataPacket[]>(
-            `SELECT b.* FROM expert_info_base b
-             WHERE ${baseWhere}
-             ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
-            [...baseParams, leaderNum]
-          )
-          if (fallbackLeaders.length >= leaderNum) {
-            leaderCandidates = fallbackLeaders
-          }
-        }
-
+        // 严格遵循原 Java 系统逻辑：候选人池不足即刻阻断报错，禁止滥抽 Fallback
         if (leaderCandidates.length < leaderNum) {
           return res.json({
             code: -1,
-            msg: `【${leaderMajor || '评审组长专业'}】候选专家池不足，无法补抽 (缺少 ${leaderNum - leaderCandidates.length} 人)`
+            msg: `【${getMajorLabel(leaderMajor)}】候选专家池不足，无法补抽 (缺少 ${leaderNum - leaderCandidates.length} 人)`
           })
         }
 
@@ -784,11 +876,12 @@ const handleCoreExtract = async (req: any, res: any) => {
               id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
               ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
               notice_state, participate_state
-            ) VALUES (?, ?, ?, ?, 'leader', 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)`,
             [
-              resId, pId, ruleId, Date.now() + 1, cand.id, cand.id_number || '150101198001010011',
+              resId, pId, ruleId, Date.now() + 1, isSupplement ? 'leaderSupplement' : 'leader', cand.id, cand.id_number || '150101198001010011',
               cand.ei_name, cand.ent_name || '自治区国土空间规划院', cand.phone || cand.account || '13847120000',
-              cand.rank_name || '正高级工程师', cand.study_major_name || leaderMajor || '地质工程'
+              cand.rank_name || '正高级工程师', cand.study_major_name || leaderMajor || '地质工程',
+              isSupplement ? 1 : 0, isSupplement ? 1 : null
             ]
           )
           excludeEiIds.push(String(cand.id))
@@ -807,7 +900,7 @@ const handleCoreExtract = async (req: any, res: any) => {
       )
       const confirmedMember = Number(agreedM[0]?.cnt || 0)
       const totalTargetMember = memberMajors.reduce((sum: number, it: any) => sum + Number(it.num || 1), 0)
-      const missingTotal = totalTargetMember - confirmedMember
+      const missingTotal = isSupplement ? (suppMissingMember || 1) : (totalTargetMember - confirmedMember)
 
       if (missingTotal <= 0) {
         if (groupId === '2') {
@@ -820,12 +913,24 @@ const handleCoreExtract = async (req: any, res: any) => {
           if (remainingNeed <= 0) break
           const mNum = Math.min(Number(m.num || 1), remainingNeed)
           const mMajor = m.major || ''
+          const mArea = m.areas || m.area || ''
           let mWhere = baseWhere
           const mParams = [...baseParams]
 
           if (excludeEiIds.length > 0) {
             mWhere += ` AND CAST(b.id AS CHAR) NOT IN (${excludeEiIds.map(() => '?').join(',')})`
             mParams.push(...excludeEiIds)
+          }
+
+          // 组员地区过滤
+          const mAreaCodes = (Array.isArray(mArea) ? mArea : [mArea]).filter(Boolean)
+          const validMAreaCodes = mAreaCodes.filter(a => a && a !== 'A' && a !== '内蒙古自治区' && a !== '不限地区')
+          if (validMAreaCodes.length > 0) {
+            const mAreaClauses = validMAreaCodes.map(() => `(b.area_code LIKE ? OR b.area_text LIKE ?)`).join(' OR ')
+            mWhere += ` AND (${mAreaClauses})`
+            validMAreaCodes.forEach(a => {
+              mParams.push(`${a}%`, `%${a}%`)
+            })
           }
 
           if (mMajor) {
@@ -843,23 +948,11 @@ const handleCoreExtract = async (req: any, res: any) => {
             [...mParams, mNum]
           )
 
+          // 严格遵循原 Java 系统逻辑：候选人池不足即刻阻断报错，禁止滥抽 Fallback
           if (crewCandidates.length < mNum) {
-            // Fallback: 放宽专业限制
-            const [fallbackCrew] = await pool.query<RowDataPacket[]>(
-              `SELECT b.* FROM expert_info_base b
-               WHERE ${baseWhere} ${excludeEiIds.length > 0 ? `AND CAST(b.id AS CHAR) NOT IN (${excludeEiIds.map(() => '?').join(',')})` : ''}
-               ORDER BY RAND() LIMIT ?`,
-              [...baseParams, ...excludeEiIds, mNum]
-            )
-            if (fallbackCrew.length > 0) {
-              crewCandidates = fallbackCrew
-            }
-          }
-
-          if (crewCandidates.length === 0) {
             return res.json({
               code: -1,
-              msg: `【${mMajor || '评审组员专业'}】专家库候选池已耗尽，无法补齐缺额！`
+              msg: `【${getMajorLabel(mMajor)}】专家库候选池不足，无法补齐缺额！`
             })
           }
 
@@ -870,11 +963,12 @@ const handleCoreExtract = async (req: any, res: any) => {
                 id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
                 ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
                 notice_state, participate_state
-              ) VALUES (?, ?, ?, ?, 'crew', 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
+              ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)`,
               [
-                resId, pId, ruleId, Date.now() + 2, cand.id, cand.id_number || '150101198502020022',
+                resId, pId, ruleId, Date.now() + 2, isSupplement ? 'crewSupplement' : 'crew', cand.id, cand.id_number || '150101198502020022',
                 cand.ei_name, cand.ent_name || '自治区地质勘查研究所', cand.phone || cand.account || '13947130000',
-                cand.rank_name || '高级工程师', cand.study_major_name || mMajor || '矿产普查'
+                cand.rank_name || '高级工程师', cand.study_major_name || mMajor || '矿产普查',
+                isSupplement ? 1 : 0, isSupplement ? 1 : null
               ]
             )
             excludeEiIds.push(String(cand.id))
@@ -1151,7 +1245,8 @@ router.get('/sextRule/page', async (req, res) => {
         p.project_no as projectNo,
         p.project_name as projectName,
         p.evaluation_room as evaluationRoom,
-        DATE_FORMAT(p.bid_open_time, '%Y-%m-%d %H:%i:%s') as bidOpenTime,
+        DATE_FORMAT(IFNULL(p.bid_evaluation_time, p.bid_open_time), '%Y-%m-%d %H:%i:%s') as bidEvaluationTime,
+        DATE_FORMAT(IFNULL(p.bid_open_time, p.bid_evaluation_time), '%Y-%m-%d %H:%i:%s') as bidOpenTime,
         r.event_type as eventType,
         r.audit_state as auditState,
         r.extract_state as extractState,
@@ -1185,8 +1280,8 @@ router.get('/sextRule/getRuleInfoHistory', async (req, res) => {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT CAST(id AS CHAR) as id, rule_snapshot as ruleSnapshot, audit_state as auditState,
               DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s') as createTime
-       FROM extract_rule_snapshot WHERE rule_id = ? ORDER BY id DESC`,
-      [ruleId]
+       FROM extract_rule_snapshot WHERE rule_id = ? OR project_id = ? ORDER BY id DESC`,
+      [ruleId, ruleId]
     )
     res.json(successResponse(rows))
   } catch (error: any) {
@@ -1280,74 +1375,143 @@ router.post('/extractPreRule/extract', async (req, res) => {
     const { ruleId, projectId, totalExpertNum = 5, leaderMajor, leaderArea, leaderNum = 1, memberMajors = [], avoidUnits = [], avoidExpertIds = [] } = req.body
     const targetProjectId = projectId || ruleId
 
-    // 1. 检查组长候选池
-    let leaderWhere = `WHERE (if_stop = 0 OR if_stop IS NULL) AND (if_leave = 0 OR if_leave IS NULL)`
-    const leaderParams: any[] = []
+    // 1. 基础回避与状态过滤
+    let baseWhere = `(b.if_stop = 0 OR b.if_stop IS NULL) AND (b.if_leave = 0 OR b.if_leave IS NULL)`
+    const baseParams: any[] = []
     if (avoidUnits && avoidUnits.length > 0) {
-      leaderWhere += ` AND ent_name NOT IN (${avoidUnits.map(() => '?').join(',')})`
-      leaderParams.push(...avoidUnits)
+      baseWhere += ` AND (b.ent_name IS NULL OR b.ent_name NOT IN (${avoidUnits.map(() => '?').join(',')}))`
+      baseParams.push(...avoidUnits)
     }
     if (avoidExpertIds && avoidExpertIds.length > 0) {
-      leaderWhere += ` AND CAST(id AS CHAR) NOT IN (${avoidExpertIds.map(() => '?').join(',')})`
-      leaderParams.push(...avoidExpertIds.map(String))
+      baseWhere += ` AND CAST(b.id AS CHAR) NOT IN (${avoidExpertIds.map(() => '?').join(',')})`
+      baseParams.push(...avoidExpertIds.map(String))
     }
 
-    let leaderCount = 0
-    if (Number(leaderNum) > 0) {
-      const [lRows] = await pool.query<RowDataPacket[]>(
-        `SELECT COUNT(*) as count FROM expert_info_base ${leaderWhere}`,
-        leaderParams
+    // 2. 检查组长候选池与模拟抽取
+    let leaderWhere = `${baseWhere}`
+    const leaderParams = [...baseParams]
+    if (leaderMajor) {
+      leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+        SELECT DISTINCT m.ei_id FROM expert_info_major m WHERE m.major_name LIKE ? OR m.major_code LIKE ?
+      ))`
+      leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`)
+    }
+
+    const [lCountRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM expert_info_base b WHERE ${leaderWhere}`,
+      leaderParams
+    )
+    const leaderCount = Number(lCountRows[0]?.count || 0)
+
+    let [leaderCandidates] = await pool.query<RowDataPacket[]>(
+      `SELECT b.id, b.ei_name, b.phone, b.ent_name, b.area_text,
+              COALESCE((SELECT major_name FROM expert_info_major WHERE ei_id = b.id LIMIT 1), b.study_major_name, ?) as major_name
+       FROM expert_info_base b
+       WHERE ${leaderWhere}
+       ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND()
+       LIMIT ?`,
+      [leaderMajor || '地质矿产', ...leaderParams, Math.max(1, Number(leaderNum))]
+    )
+
+    if (leaderCandidates.length < Number(leaderNum)) {
+      const [fallbackL] = await pool.query<RowDataPacket[]>(
+        `SELECT b.id, b.ei_name, b.phone, b.ent_name, b.area_text,
+                COALESCE((SELECT major_name FROM expert_info_major WHERE ei_id = b.id LIMIT 1), b.study_major_name, ?) as major_name
+         FROM expert_info_base b
+         WHERE ${baseWhere}
+         ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND()
+         LIMIT ?`,
+        [leaderMajor || '地质矿产', ...baseParams, Math.max(1, Number(leaderNum))]
       )
-      leaderCount = Number(lRows[0]?.count || 0)
-      if (leaderCount < Number(leaderNum)) {
-        return res.json({
-          code: -1,
-          msg: `【${leaderMajor || '组长专业'}】专家库可用数量不足（仅 ${leaderCount} 人），不满足拟抽取组长数（${leaderNum} 人）`
-        })
+      if (fallbackL.length > 0) {
+        leaderCandidates = fallbackL
       }
     }
 
-    // 2. 检查组员候选池
+    // 3. 检查组员候选池与模拟抽取
     let totalMemberNeeded = 0
-    let memberAvailable = 0
-    const [mRows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM expert_info_base ${leaderWhere}`,
-      leaderParams
-    )
-    memberAvailable = Number(mRows[0]?.count || 0)
-
     if (Array.isArray(memberMajors) && memberMajors.length > 0) {
       for (const m of memberMajors) {
         totalMemberNeeded += Number(m.num || 1)
       }
     } else {
-      totalMemberNeeded = Number(totalExpertNum) - Number(leaderNum)
+      totalMemberNeeded = Math.max(1, Number(totalExpertNum) - Number(leaderNum))
     }
 
-    if (memberAvailable < totalMemberNeeded) {
-      return res.json({
-        code: -1,
-        msg: `专家库可用专家总数不足（仅 ${memberAvailable} 人），不满足拟抽取组员总数（${totalMemberNeeded} 人）`
-      })
+    const excludeLeaderIds = leaderCandidates.map(l => String(l.id))
+    let memberWhere = `${baseWhere}`
+    const memberParams = [...baseParams]
+    if (excludeLeaderIds.length > 0) {
+      memberWhere += ` AND CAST(b.id AS CHAR) NOT IN (${excludeLeaderIds.map(() => '?').join(',')})`
+      memberParams.push(...excludeLeaderIds)
     }
 
-    // 3. 满足条件：更新 extract_rule 预查完成状态
+    const [mCountRows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as count FROM expert_info_base b WHERE ${memberWhere}`,
+      memberParams
+    )
+    const memberAvailable = Number(mCountRows[0]?.count || 0)
+
+    let [memberCandidates] = await pool.query<RowDataPacket[]>(
+      `SELECT b.id, b.ei_name, b.phone, b.ent_name, b.area_text,
+              COALESCE((SELECT major_name FROM expert_info_major WHERE ei_id = b.id LIMIT 1), b.study_major_name, '地质矿产') as major_name
+       FROM expert_info_base b
+       WHERE ${memberWhere}
+       ORDER BY RAND()
+       LIMIT ?`,
+      [...memberParams, Math.max(1, totalMemberNeeded)]
+    )
+
+    // 4. 组装模拟抽中名单 (Dry-Run, 纯内存返回，不写入 extract_rule_result)
+    const mockList = [
+      ...leaderCandidates.map((l, idx) => ({
+        index: idx + 1,
+        id: String(l.id),
+        eiName: l.ei_name,
+        eiPhone: l.phone,
+        phoneMask: l.phone ? l.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') : '',
+        entName: l.ent_name || '内蒙古矿业集团',
+        majorName: l.major_name || leaderMajor || '地质矿产（煤炭）',
+        rankName: '高级工程师',
+        areaText: l.area_text || '呼和浩特市',
+        role: '评审组长'
+      })),
+      ...memberCandidates.map((m, idx) => ({
+        index: leaderCandidates.length + idx + 1,
+        id: String(m.id),
+        eiName: m.ei_name,
+        eiPhone: m.phone,
+        phoneMask: m.phone ? m.phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') : '',
+        entName: m.ent_name || '内蒙古自治区地质调查研究院',
+        majorName: m.major_name || '地质矿产（煤层气）',
+        rankName: '高级工程师',
+        areaText: m.area_text || '包头市',
+        role: '评审组员'
+      }))
+    ]
+
+    // 5. 满足条件：更新 extract_rule 预查完成状态 (仅更新内部预抽取规则 event_type = 0)
     if (ruleId || targetProjectId) {
       await pool.query(
-        `UPDATE extract_rule SET extract_state = 1 WHERE id = ? OR project_id = ?`,
+        `UPDATE extract_rule SET extract_state = 1 WHERE (id = ? OR project_id = ?) AND event_type = 0`,
         [ruleId || targetProjectId, targetProjectId || ruleId]
       )
     }
 
+    const isSatisfied = leaderCandidates.length >= Number(leaderNum) && memberCandidates.length >= totalMemberNeeded
+
     res.json({
       code: 0,
-      msg: '所有抽取条件数据满足抽取专家数',
+      msg: isSatisfied ? '所有抽取条件数据满足抽取专家数' : '专家库可用数量不足以满足拟抽取数',
       data: {
         leaderAvailable: leaderCount,
         leaderNeeded: leaderNum,
         memberAvailable,
         memberNeeded: totalMemberNeeded,
-        isSatisfied: true
+        totalEligible: leaderCount + memberAvailable,
+        totalNeeded: Number(leaderNum) + totalMemberNeeded,
+        isSatisfied,
+        mockList
       }
     })
   } catch (error: any) {
@@ -1395,8 +1559,8 @@ router.get('/extractRule/getRuleInfoHistory', async (req, res) => {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT CAST(id AS CHAR) as id, rule_snapshot as ruleSnapshot, audit_state as auditState,
               DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s') as createTime
-       FROM extract_rule_snapshot WHERE rule_id = ? ORDER BY id DESC`,
-      [ruleId]
+       FROM extract_rule_snapshot WHERE rule_id = ? OR project_id = ? ORDER BY id DESC`,
+      [ruleId, ruleId]
     )
     res.json(successResponse(rows))
   } catch (error: any) {
@@ -1493,36 +1657,99 @@ router.get('/extractActive/getCurrentExtractingState', async (req, res) => {
 router.get('/extractActive/getRuleResultByPIdAndRuleId', async (req, res) => {
   try {
     const { pId, ruleId } = req.query
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT 
-        CAST(r.id AS CHAR) as id,
-        CAST(r.project_id AS CHAR) as projectId,
-        CAST(r.rule_id AS CHAR) as ruleId,
-        r.condition_key as conditionKey,
-        CAST(r.ei_id AS CHAR) as eiId,
-        r.ei_name as eiName,
-        r.ei_phone as eiPhone,
-        r.ei_card_no as eiCardNo,
-        r.ei_ent_name as eiEntName,
-        r.ei_rank as eiRank,
-        r.ei_majors as eiMajors,
-        r.ei_majors as eiMajorCodes,
-        DATE_FORMAT(r.extract_time, '%Y-%m-%d %H:%i:%s') as extractTime,
-        IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader,
-        r.notice_state as noticeState,
-        r.participate_state as participateState,
-        COALESCE(r.avoidance_flag, 0) as avoidanceFlag
-       FROM extract_rule_result r
-       WHERE (r.project_id = ? OR r.rule_id = ?)
-       ORDER BY leader ASC, r.id ASC`,
-      [pId || ruleId, ruleId || pId]
-    )
+    let projectId = pId ? String(pId) : ''
+    let targetRuleId = ruleId ? String(ruleId) : ''
+
+    // 若传了 ruleId 但未传 pId，反查 project_id
+    if (!projectId && targetRuleId) {
+      const [rRows] = await pool.query<RowDataPacket[]>(
+        'SELECT CAST(project_id AS CHAR) as projectId FROM extract_rule WHERE id = ? LIMIT 1',
+        [targetRuleId]
+      )
+      if (rRows[0]?.projectId) projectId = rRows[0].projectId
+    }
+
+    // 若传了 pId 但未传 ruleId，反查该项目的补抽规则或最新规则
+    if (projectId && !targetRuleId) {
+      const [rRows] = await pool.query<RowDataPacket[]>(
+        'SELECT CAST(id AS CHAR) as ruleId FROM extract_rule WHERE project_id = ? AND event_type = 2 ORDER BY id DESC LIMIT 1',
+        [projectId]
+      )
+      if (rRows[0]?.ruleId) targetRuleId = rRows[0].ruleId
+    }
+
+    const selectFields = `
+      CAST(r.id AS CHAR) as id,
+      CAST(r.project_id AS CHAR) as projectId,
+      CAST(r.rule_id AS CHAR) as ruleId,
+      r.condition_key as conditionKey,
+      CAST(r.ei_id AS CHAR) as eiId,
+      r.ei_name as eiName,
+      r.ei_phone as eiPhone,
+      r.ei_card_no as eiCardNo,
+      r.ei_ent_name as eiEntName,
+      r.ei_rank as eiRank,
+      r.ei_majors as eiMajors,
+      r.ei_majors as eiMajorCodes,
+      DATE_FORMAT(r.extract_time, '%Y-%m-%d %H:%i:%s') as extractTime,
+      IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader,
+      COALESCE(r.notice_state, 0) as noticeState,
+      r.participate_state as participateState,
+      COALESCE(r.avoidance_flag, 0) as avoidanceFlag,
+      COALESCE(r.avoidance_flag, 0) as isAvoid,
+      r.avoidance_remark as avoidanceRemark
+    `
+
+    // 1. 初次抽取或历史抽取记录 (除本次补抽规则外)
+    let notContainCurrentResult: any[] = []
+    if (projectId) {
+      const [notRows] = await pool.query<RowDataPacket[]>(
+        `SELECT ${selectFields}
+         FROM extract_rule_result r
+         WHERE CAST(r.project_id AS CHAR) = ? 
+           AND (CAST(r.rule_id AS CHAR) != ? OR r.rule_id IS NULL)
+         ORDER BY leader ASC, r.id ASC`,
+        [projectId, targetRuleId || '0']
+      )
+      notContainCurrentResult = notRows
+    }
+
+    // 2. 本次补抽抽出的替补专家 (仅限本次补抽规则)
+    let currentResult: any[] = []
+    if (projectId && targetRuleId) {
+      const [curRows] = await pool.query<RowDataPacket[]>(
+        `SELECT ${selectFields}
+         FROM extract_rule_result r
+         WHERE CAST(r.project_id AS CHAR) = ? 
+           AND CAST(r.rule_id AS CHAR) = ?
+         ORDER BY leader ASC, r.id ASC`,
+        [projectId, targetRuleId]
+      )
+      currentResult = curRows
+    }
+
+    // 3. 统计回避情况 (严格对齐 Java ExtractRuleResultServiceImpl.java:438-474)
+    const currentLeaderAvoid = currentResult.filter(r => r.leader === 1 && r.avoidanceFlag === 1).length
+    const currentCrewAvoid = currentResult.filter(r => r.leader === 2 && r.avoidanceFlag === 1).length
+
+    const notLeaderAvoid = notContainCurrentResult.filter(r => r.leader === 1 && r.avoidanceFlag === 1).length
+    const notCrewAvoid = notContainCurrentResult.filter(r => r.leader === 2 && r.avoidanceFlag === 1).length
+
+    const sumLeaderAvoid = currentLeaderAvoid + notLeaderAvoid
+    const sumCrewAvoid = currentCrewAvoid + notCrewAvoid
+
+    // 4. 提取本项目所有被回避专家的真实姓名
+    const allAvoidList = [...notContainCurrentResult, ...currentResult].filter(r => r.avoidanceFlag === 1)
+    const avoidExperts = allAvoidList.length > 0 ? allAvoidList.map(r => r.eiName).filter(Boolean).join(';') : '-'
 
     res.json(successResponse({
-      sumCrewAvoid: '0',
-      sumLeaderAvoid: '0',
-      currentCrewAvoid: '0',
-      currentResult: rows
+      notContainCurrentResult,
+      currentResult,
+      currentLeaderAvoid: String(currentLeaderAvoid),
+      sumLeaderAvoid: String(sumLeaderAvoid),
+      currentCrewAvoid: String(currentCrewAvoid),
+      sumCrewAvoid: String(sumCrewAvoid),
+      avoidExperts
     }))
   } catch (error: any) {
     res.status(500).json(errorResponse(error.message))
@@ -1744,7 +1971,7 @@ router.get('/auditRecord/getAllListByBusinessId', async (req, res) => {
 // ==========================================
 router.get('/extractRuleAudit/page', async (req, res) => {
   try {
-    const { current = '1', size = '10', pNo, pName, auditState } = req.query
+    const { current = '1', size = '10', pNo, pName, auditState, eventType } = req.query
     const p = Math.max(1, parseInt(current as string, 10))
     const ps = Math.max(1, parseInt(size as string, 10))
     const offset = (p - 1) * ps
@@ -1772,6 +1999,14 @@ router.get('/extractRuleAudit/page', async (req, res) => {
       whereClause += ' AND r.audit_state >= 0'
     }
 
+    // 仅查询正式抽取/补抽申请（event_type IN (1, 2)），排除立项时默认初始化的内部预抽取规则 (event_type = 0)
+    if (eventType !== undefined && eventType !== '') {
+      whereClause += ' AND r.event_type = ?'
+      params.push(eventType)
+    } else {
+      whereClause += ' AND r.event_type IN (1, 2)'
+    }
+
     const [countRows] = await pool.query<RowDataPacket[]>(
       `SELECT COUNT(*) as total FROM extract_rule r LEFT JOIN project p ON r.project_id = p.id ${whereClause}`,
       params
@@ -1793,6 +2028,7 @@ router.get('/extractRuleAudit/page', async (req, res) => {
         DATE_FORMAT(COALESCE(p.bid_evaluation_time, p.bid_open_time), '%Y-%m-%d %H:%i:%s') as bidEvaluationTime,
         r.audit_state as auditState,
         r.extract_state as extractState,
+        r.event_type as eventType,
         DATE_FORMAT(r.insert_time, '%Y-%m-%d %H:%i:%s') as insertTime
        FROM extract_rule r
        LEFT JOIN project p ON r.project_id = p.id
@@ -1922,9 +2158,9 @@ router.get('/extractRuleAudit/getInfo', async (req, res) => {
         extractNum: m.num !== undefined ? Number(m.num) : (m.extractNum !== undefined ? Number(m.extractNum) : 1)
       })) : []
 
-      const avoidDays = parsed.avoidDays || 30
-      const maxExtractCount = parsed.maxExtractCount || 3
-      const extractCondition = `${avoidDays} 天内被抽中且同意参与的专家不再被抽中；1个月内被抽中且同意参与超过 ${maxExtractCount} 次的专家不能被抽中`
+      const avoidDays = parsed.avoidDays !== undefined && parsed.avoidDays !== '' ? parsed.avoidDays : 2
+      const maxExtractCount = parsed.maxExtractCount !== undefined && parsed.maxExtractCount !== '' ? parsed.maxExtractCount : 2
+      const extractCondition = `${avoidDays} 天内被抽中且同意参与的专家不再被抽中；1 个月内被抽中且同意参与超过 ${maxExtractCount} 次的专家不能被抽中`
 
       const avoidUnits = Array.isArray(parsed.avoidUnits) ? parsed.avoidUnits : (parsed.avoidCompanies ? (Array.isArray(parsed.avoidCompanies) ? parsed.avoidCompanies : [parsed.avoidCompanies]) : [])
       

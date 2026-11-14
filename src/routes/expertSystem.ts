@@ -1,10 +1,13 @@
 import { Router } from 'express'
 import path from 'path'
 import fs from 'fs'
+import { execFileSync } from 'child_process'
 import multer from 'multer'
 import { pool } from '../config/db'
 import { successResponse, errorResponse } from '../types'
 import type { RowDataPacket, ResultSetHeader } from 'mysql2'
+import { NATIVE_AREA_TREE, NATIVE_MAJOR_TREE, NATIVE_ENT_NAMES } from '../constants/nativeDictionaries'
+import { dynamicLearnMajorTree, dynamicEduList } from './dictTools'
 
 // ==============================================================================
 // 【内网机房配置备忘】原地调院生产内网私有 MinIO 附件服务配置
@@ -638,27 +641,26 @@ router.get('/expertInfoBase/allEntName', (req, res) => {
 // 14.1 专家名录导入模板下载 GET /etbApi/expert-system/expertInfoBase/template
 router.get('/expertInfoBase/template', (_req, res) => {
   try {
-    const customTemplatePath = path.join(uploadDir, 'templates/expert_import_template.xlsx')
-    if (fs.existsSync(customTemplatePath)) {
-      return res.download(customTemplatePath, '评审专家名录导入模板.xlsx')
+    // 优先提供用户定制的标准模板文件，后续若替换模板只需更新 templates/ 目录对应文件
+    const candidatePaths = [
+      path.resolve(__dirname, '../../templates/专家批量导入模版.xlsx'),
+      path.resolve(process.cwd(), 'templates/专家批量导入模版.xlsx'),
+      path.join(uploadDir, 'templates/专家批量导入模版.xlsx')
+    ]
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        res.setHeader('Content-Disposition', 'attachment; filename=' + encodeURIComponent('专家批量导入模版.xlsx'))
+        return res.sendFile(p)
+      }
     }
 
-    // 逆向源码标准 20 列表头 (带 UTF-8 BOM 防 Excel 乱码)
-    const headers = [
-      '专家姓名', '专家性别', '手机号', '专家身份证号', '所属单位',
-      '单位统一社会信用代码', '所属地区', '所属专业', '职称', '申请方式',
-      '推荐人姓名', '推荐人身份证号', '推荐人联系电话', '推荐企业名称',
-      '推荐企业统一社会信用代码', '企业联系电话', '是否组长', '是否退休', '学历', '所学专业'
-    ]
-    const sampleRow = [
-      '张建国', '男', '13947188001', '15010219780101221X', '内蒙古地质矿产勘查有限责任公司',
-      '91150100XXXXXXXXXX', '内蒙古自治区-呼和浩特市', '矿产地质勘查', '正高级工程师', '单位推荐',
-      '李四', '150102197501015678', '13900139000', '自治区地质矿产集团',
-      '91150000XXXXXXXXXX', '0471-1234567', '否', '否', '大学本科', '地质矿产'
-    ]
-    const csvContent = '\uFEFF' + headers.join(',') + '\n' + sampleRow.join(',') + '\n'
+    // fallback 为用户标准 14 列表头 CSV 模板
+    const csvContent = '\uFEFF专家批量导入模版,,,,,,,,,,,,,\n' +
+      '专家姓名,所属专业,是否退休,是否组长,专家性别,专家身份证号,手机号,单位统一社会信用代码,所属单位,所属地区,学历,所学专业,职称,申请方式\n' +
+      '测试1,地质矿产（煤炭）,否,是,男,150102198001012219,18600000000,91150100MA0N5Y0001,内蒙古地质矿产勘查有限责任公司,内蒙古自治区-呼和浩特市,博士,矿山工程,正高,批量导入\n'
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader('Content-Disposition', 'attachment; filename=' + encodeURIComponent('评审专家名录导入模板.csv'))
+    res.setHeader('Content-Disposition', 'attachment; filename=' + encodeURIComponent('专家批量导入模版.csv'))
     res.send(csvContent)
   } catch (error: any) {
     res.status(500).json(errorResponse('下载模板失败: ' + error.message))
@@ -1506,89 +1508,370 @@ router.post('/expertInfoBase/update', async (req, res) => {
   }
 })
 
+// 内部解析 Excel/CSV 文件
+function parseImportRows(filePath: string, originalName: string): { headers: Record<string, number>, rows: { rowNum: number, data: Record<string, string> }[] } {
+  const ext = path.extname(originalName).toLowerCase()
+  const rawRows: { rowIndex: number, cols: string[] }[] = []
+
+  if (ext === '.xlsx') {
+    const stringsXml = execFileSync('unzip', ['-p', filePath, 'xl/sharedStrings.xml'], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
+    const sheetXml = execFileSync('unzip', ['-p', filePath, 'xl/worksheets/sheet1.xml'], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
+
+    const strings: string[] = []
+    const siMatches = stringsXml.match(/<si[\s\S]*?<\/si>/g) || []
+    for (const si of siMatches) {
+      const tMatches = si.match(/<t[\s\S]*?>([\s\S]*?)<\/t>/g) || []
+      let text = ''
+      for (const t of tMatches) {
+        const m = t.match(/<t[\s\S]*?>([\s\S]*?)<\/t>/)
+        if (m) text += m[1]
+      }
+      strings.push(text)
+    }
+
+    const rowMatches = sheetXml.match(/<row[\s\S]*?<\/row>/g) || []
+    for (const rXml of rowMatches) {
+      const rNumMatch = rXml.match(/r=\"(\d+)\"/)
+      const rIndex = rNumMatch ? parseInt(rNumMatch[1], 10) : rawRows.length + 1
+      const cMatches = rXml.match(/<c[\s\S]*?<\/c>|<c[^\/>]*\/>/g) || []
+      const rowCols: string[] = []
+      for (const c of cMatches) {
+        const refMatch = c.match(/r=\"([A-Z]+)\d+\"/)
+        if (!refMatch) continue
+        const colLetter = refMatch[1]
+        let colIdx = 0
+        for (let i = 0; i < colLetter.length; i++) {
+          colIdx = colIdx * 26 + (colLetter.charCodeAt(i) - 64)
+        }
+        colIdx = colIdx - 1
+
+        const isString = /t=\"s\"/.test(c)
+        const vMatch = c.match(/<v>([\s\S]*?)<\/v>/)
+        let val = vMatch ? vMatch[1] : ''
+        if (isString && val !== '') {
+          const idx = parseInt(val, 10)
+          val = strings[idx] !== undefined ? strings[idx] : val
+        }
+        rowCols[colIdx] = (val || '').trim()
+      }
+      rawRows.push({ rowIndex: rIndex, cols: rowCols })
+    }
+  } else {
+    const content = fs.readFileSync(filePath, 'utf8')
+    const cleanContent = content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content
+    const lines = cleanContent.split(/\r?\n/)
+    let lineIdx = 1
+    for (const line of lines) {
+      if (line.trim().length > 0) {
+        const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''))
+        rawRows.push({ rowIndex: lineIdx, cols })
+      }
+      lineIdx++
+    }
+  }
+
+  // 识别表头行（包含“专家姓名”）
+  let headerIndex = -1
+  let headerCols: string[] = []
+  for (let i = 0; i < rawRows.length; i++) {
+    const r = rawRows[i]
+    if (r.cols.includes('专家姓名') && (r.cols.includes('所属专业') || r.cols.includes('手机号'))) {
+      headerIndex = i
+      headerCols = r.cols
+      break
+    }
+  }
+
+  if (headerIndex === -1) {
+    throw new Error('未识别到包含【专家姓名】的标准表头行，请使用规范模板！')
+  }
+
+  const headers: Record<string, number> = {}
+  for (let colIdx = 0; colIdx < headerCols.length; colIdx++) {
+    const name = headerCols[colIdx]
+    if (name) headers[name.trim()] = colIdx
+  }
+
+  const rows: { rowNum: number, data: Record<string, string> }[] = []
+  for (let i = headerIndex + 1; i < rawRows.length; i++) {
+    const r = rawRows[i]
+    const rowObj: Record<string, string> = {}
+    let hasVal = false
+    for (const [name, colIdx] of Object.entries(headers)) {
+      const val = (r.cols[colIdx] || '').trim()
+      rowObj[name] = val
+      if (val) hasVal = true
+    }
+    if (hasVal) {
+      rows.push({ rowNum: r.rowIndex, data: rowObj })
+    }
+  }
+
+  return { headers, rows }
+}
+
 // 16. 专家管理员 - 批量导入专家名录 POST /etbApi/expert-system/expertInfoBase/import
 router.post('/expertInfoBase/import', upload.single('file'), async (req, res) => {
+  let tempFilePath: string | null = null
   try {
-    let importedCount = 0
+    let rowsToProcess: { rowNum: number, data: Record<string, string> }[] = []
 
-    // 场景 1：真实文件上传（支持 CSV、文本及 Excel 格式）
     if (req.file) {
-      const filePath = req.file.path
-      const ext = path.extname(req.file.originalname).toLowerCase()
+      tempFilePath = req.file.path
+      let originalName = req.file.originalname
+      try {
+        originalName = Buffer.from(req.file.originalname, 'latin1').toString('utf8')
+      } catch (e) {}
 
-      if (ext === '.csv' || ext === '.txt') {
-        const content = fs.readFileSync(filePath, 'utf8')
-        const cleanContent = content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content
-        const lines = cleanContent.split(/\r?\n/).filter(line => line.trim().length > 0)
+      const parsed = parseImportRows(tempFilePath, originalName)
+      rowsToProcess = parsed.rows
+    } else if (Array.isArray(req.body.expertList) && req.body.expertList.length > 0) {
+      rowsToProcess = req.body.expertList.map((item: any, idx: number) => ({
+        rowNum: idx + 1,
+        data: item
+      }))
+    } else {
+      return res.status(400).json(errorResponse('未检测到需要导入的文件或数据'))
+    }
 
-        if (lines.length > 1) {
-          const header = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
-          const nameIdx = header.indexOf('专家姓名') !== -1 ? header.indexOf('专家姓名') : 0
-          const sexIdx = header.indexOf('专家性别')
-          const phoneIdx = header.indexOf('手机号') !== -1 ? header.indexOf('手机号') : 2
-          const idNumIdx = header.indexOf('专家身份证号') !== -1 ? header.indexOf('专家身份证号') : 3
-          const entIdx = header.indexOf('所属单位') !== -1 ? header.indexOf('所属单位') : 4
+    if (rowsToProcess.length === 0) {
+      return res.status(400).json(errorResponse('导入文件中未检测到有效的专家数据行，请检查后重新上传！'))
+    }
 
-          for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''))
-            const eiName = cols[nameIdx]
-            if (!eiName) continue
+    // 预查询数据库字典
+    const [dbMajors] = await pool.query<RowDataPacket[]>(
+      'SELECT id, major_name, major_code, major_path FROM brace_major WHERE major_status = 0'
+    )
+    const [dbRanks] = await pool.query<RowDataPacket[]>(
+      'SELECT id, rank_name FROM brace_rank WHERE rank_status = 0'
+    )
 
-            const phone = cols[phoneIdx] || '13800000000'
-            const idNumber = cols[idNumIdx] || '150101198001010000'
-            const entName = cols[entIdx] || '自治区地质矿产勘查单位'
-            const sex = cols[sexIdx] === '女' ? 2 : 1
-            const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
+    const failRows: { rowNum: number, errors: string[] }[] = []
+    const validRows: any[] = []
 
-            await pool.query(
-              `INSERT INTO expert_info_base (
-                id, ei_name, sex, phone, account, password, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, audit_state, source_type, insert_time
-              ) VALUES (?, ?, ?, ?, ?, 'z123456', ?, ?, 95, '甲', 0, 0, 0, 2, 1, 2, NOW())`,
-              [newId, eiName, sex, phone, phone, idNumber, entName]
-            )
-            importedCount++
+    // 逐行严格字典校验（未命中绝不设默认值）
+    for (const rowItem of rowsToProcess) {
+      const { rowNum, data: row } = rowItem
+      const rowErrors: string[] = []
+
+      // 1. 专家姓名
+      const eiName = (row['专家姓名'] || row['eiName'] || '').trim()
+      if (!eiName) rowErrors.push('专家姓名不能为空')
+
+      // 2. 手机号
+      const phone = (row['手机号'] || row['phone'] || '').trim()
+      if (!/^1\d{10}$/.test(phone)) {
+        rowErrors.push(`手机号【${phone || '空'}】格式不正确，须为11位数字`)
+      }
+
+      // 3. 身份证号
+      const idNumber = (row['专家身份证号'] || row['idNumber'] || '').trim()
+      if (!idNumber || idNumber.length < 15) {
+        rowErrors.push(`身份证号【${idNumber || '空'}】格式不正确`)
+      }
+
+      // 4. 是否退休与单位信息
+      const ifRetireStr = (row['是否退休'] || row['ifRetire'] || '').trim()
+      const ifRetire = ifRetireStr === '是' ? 1 : 0
+      const entName = (row['所属单位'] || row['entName'] || '').trim()
+      const entCode = (row['单位统一社会信用代码'] || row['entCode'] || '').trim()
+      if (ifRetire === 0) {
+        if (!entName) rowErrors.push('所属单位不能为空（若已退休请将“是否退休”填为“是”）')
+        if (!entCode) rowErrors.push('统一社会信用代码不能为空（若已退休请将“是否退休”填为“是”）')
+      }
+
+      // 5. 是否组长与性别
+      const leader = (row['是否组长'] || row['leader'] || '').trim() === '是' ? 1 : 2
+      const sex = (row['专家性别'] || row['sex'] || '').trim() === '女' ? 2 : 1
+
+      // 6. 申请方式
+      let applyWay = 3 // 默认为批量导入
+      const applyWayStr = (row['申请方式'] || row['applyWay'] || '').trim()
+      if (applyWayStr === '单位推荐') applyWay = 1
+      else if (applyWayStr === '自我推荐') applyWay = 2
+
+      // 7. 【所属地区】字典校验（未命中坚决不设默认值）
+      const areaText = (row['所属地区'] || row['areaText'] || '').trim()
+      let areaCode: string | null = null
+      let areaFullName: string | null = null
+      if (areaText) {
+        for (const prov of NATIVE_AREA_TREE) {
+          if (areaText === prov.name) {
+            areaCode = prov.majorPath || prov.code
+            areaFullName = prov.name
+            break
+          }
+          if (prov.children) {
+            for (const city of prov.children) {
+              if (areaText === `${prov.name}-${city.name}` || areaText === city.name) {
+                areaCode = city.majorPath || `${prov.code}-${city.code}`
+                areaFullName = `${prov.name}-${city.name}`
+                break
+              }
+            }
+          }
+          if (areaCode) break
+        }
+      }
+      if (!areaCode) {
+        rowErrors.push(`所属地区【${areaText || '空'}】未匹配系统区划字典（请按规范填写，如：内蒙古自治区-呼和浩特市）`)
+      }
+
+      // 8. 【所属专业】字典校验（未命中坚决不设默认值）
+      const majorText = (row['所属专业'] || row['major'] || '').trim()
+      const majorNames = majorText.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+      const matchedMajors: any[] = []
+      if (majorNames.length === 0) {
+        rowErrors.push('所属专业不能为空')
+      } else {
+        for (const mName of majorNames) {
+          const found = dbMajors.find(m => m.major_name === mName)
+          if (found) {
+            matchedMajors.push(found)
+          } else {
+            rowErrors.push(`所属专业【${mName}】未匹配系统行业专业字典`)
           }
         }
+      }
+
+      // 9. 【职称】字典校验（未命中坚决不设默认值）
+      const rankText = (row['职称'] || row['rank'] || '').trim()
+      let matchedRank: any = null
+      if (!rankText) {
+        rowErrors.push('职称不能为空')
       } else {
-        // 二进制 Excel 文件暂存入库，保障流程通畅
-        const originalName = req.file.originalname.replace(/\.[^/.]+$/, '')
-        const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
-        await pool.query(
-          `INSERT INTO expert_info_base (
-            id, ei_name, sex, phone, account, password, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, audit_state, source_type, insert_time
-          ) VALUES (?, ?, 1, '13947188000', '13947188000', 'z123456', '150102198001010000', '自治区自然资源专家库', 95, '甲', 0, 0, 0, 2, 1, 2, NOW())`,
-          [newId, originalName || '导入专家']
-        )
-        importedCount = 1
+        matchedRank = dbRanks.find(r => r.rank_name === rankText)
+        if (!matchedRank) {
+          if (rankText === '正高') matchedRank = dbRanks.find(r => r.rank_name === '正高' || r.rank_name === '正高级工程师')
+          else if (rankText === '副高') matchedRank = dbRanks.find(r => r.rank_name === '高级工程师' || r.rank_name === '副高级')
+        }
+        if (!matchedRank) {
+          rowErrors.push(`职称【${rankText}】未匹配系统职称字典`)
+        }
       }
 
-      try { fs.unlinkSync(filePath) } catch (e) {}
-
-      return res.json(successResponse({ success: true, count: importedCount }, `文件解析完成，成功导入入库 ${importedCount} 位专家！`))
-    }
-
-    // 场景 2：支持前端传递 JSON 数据
-    const { expertList = [] } = req.body
-    if (Array.isArray(expertList) && expertList.length > 0) {
-      for (const item of expertList) {
-        if (!item.name) continue
-        const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
-        const phone = item.phone || '13800000000'
-        await pool.query(
-          `INSERT INTO expert_info_base (
-            id, ei_name, sex, phone, account, password, id_number, ent_name, assess_score, assess_level, if_stop, if_leave, if_black, leader, audit_state, source_type, insert_time
-          ) VALUES (?, ?, 1, ?, ?, 'z123456', ?, ?, 95, '甲', 0, 0, 0, 2, 1, 2, NOW())`,
-          [newId, item.name, phone, phone, item.idNumber || '150101198001010000', item.entName || '自治区地质矿产集团']
-        )
-        importedCount++
+      // 10. 【学历】字典校验（未命中坚决不设默认值）
+      const degreeText = (row['学历'] || row['degree'] || '').trim()
+      let degreeId: string | null = null
+      if (!degreeText) {
+        rowErrors.push('学历不能为空')
+      } else {
+        if (degreeText === '博士' || degreeText === '博士研究生') degreeId = '16'
+        else if (degreeText === '硕士' || degreeText === '硕士研究生') degreeId = '15'
+        else if (degreeText === '本科' || degreeText === '大学本科') degreeId = '14'
+        else if (degreeText === '大专' || degreeText === '专科') degreeId = '17'
+        else if (degreeText === '中专' || degreeText === '中专及其他') degreeId = '18'
+        else {
+          const foundEdu = dynamicEduList.find(e => e.name === degreeText)
+          if (foundEdu) degreeId = foundEdu.id
+        }
+        if (!degreeId) {
+          rowErrors.push(`学历【${degreeText}】未匹配系统学历字典（可选：博士、硕士、本科、大专、中专）`)
+        }
       }
-      return res.json(successResponse({ success: true, count: importedCount }, `成功批量导入 ${importedCount} 位合规评审专家名录！`))
+
+      // 11. 【所学专业】字典校验（未命中坚决不设默认值）
+      const studyMajorText = (row['所学专业'] || row['studyMajor'] || '').trim()
+      let studyMajorId: string | null = null
+      if (!studyMajorText) {
+        rowErrors.push('所学专业不能为空')
+      } else {
+        const searchTree = (nodes: any[]): any => {
+          for (const node of nodes) {
+            if (node.name === studyMajorText) return node
+            if (node.children && node.children.length > 0) {
+              const res = searchTree(node.children)
+              if (res) return res
+            }
+          }
+          return null
+        }
+        const foundStudy = searchTree(dynamicLearnMajorTree)
+        if (foundStudy) {
+          studyMajorId = String(foundStudy.id)
+        } else {
+          rowErrors.push(`所学专业【${studyMajorText}】未匹配系统所学专业字典`)
+        }
+      }
+
+      // 校验结果分流
+      if (rowErrors.length > 0) {
+        failRows.push({ rowNum, errors: rowErrors })
+      } else {
+        validRows.push({
+          eiName,
+          sex,
+          phone,
+          idNumber,
+          entName,
+          entCode,
+          ifRetire,
+          leader,
+          applyWay,
+          areaCode,
+          areaText: areaFullName,
+          degreeId,
+          studyMajorId,
+          matchedMajors,
+          matchedRank
+        })
+      }
     }
 
-    res.status(400).json(errorResponse('未检测到需要导入的文件或数据'))
+    // 入库通过校验的行
+    let successCount = 0
+    for (const valid of validRows) {
+      const newId = Date.now().toString() + Math.floor(Math.random() * 1000)
+
+      await pool.query(
+        `INSERT INTO expert_info_base (
+          id, ei_name, sex, phone, account, password, id_number, ent_name, ent_code,
+          area_code, area_text, degree, study_major, leader, if_retire, apply_way,
+          assess_score, assess_level, if_stop, if_leave, if_black, if_lock, if_perfect_info,
+          audit_state, source_type, insert_time, last_update_time
+        ) VALUES (
+          ?, ?, ?, ?, ?, 'z123456', ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?,
+          95, '甲', 0, 0, 0, 0, 0,
+          1, 2, NOW(), NOW()
+        )`,
+        [
+          newId, valid.eiName, valid.sex, valid.phone, valid.phone, valid.idNumber, valid.entName, valid.entCode,
+          valid.areaCode, valid.areaText, valid.degreeId, valid.studyMajorId, valid.leader, valid.ifRetire, valid.applyWay
+        ]
+      )
+
+      for (const m of valid.matchedMajors) {
+        const mId = Date.now().toString() + Math.floor(Math.random() * 1000)
+        await pool.query(
+          `INSERT INTO expert_info_major (
+            id, ei_id, major_code, rank_code, insert_time
+          ) VALUES (?, ?, ?, ?, NOW())`,
+          [mId, newId, m.major_path || m.major_code, valid.matchedRank.id]
+        )
+      }
+
+      successCount++
+    }
+
+    // 汇总反馈信息（方案 A：容错部分导入，结构化返回统计与错误明细）
+    const totalCount = rowsToProcess.length
+    const failCount = failRows.length
+    const summaryMsg = `共检测到 ${totalCount} 条数据，成功导入 ${successCount} 条，校验失败 ${failCount} 条。`
+
+    return res.json(successResponse({
+      totalCount,
+      successCount,
+      failCount,
+      failList: failRows
+    }, summaryMsg))
   } catch (error: any) {
     console.error('导入专家失败:', error)
-    res.status(500).json(errorResponse('导入专家失败: ' + error.message))
+    res.status(500).json(errorResponse('导入专家异常: ' + error.message))
+  } finally {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath) } catch (e) {}
+    }
   }
 })
 
@@ -1637,10 +1920,7 @@ router.get('/expertInfoChange/detail/:id', async (req, res) => {
   }
 })
 
-export default router
 
-
-import { NATIVE_AREA_TREE, NATIVE_MAJOR_TREE, NATIVE_ENT_NAMES } from '../constants/nativeDictionaries'
 
 // 12. 获取地区字典树 GET /etbApi/brace/braceDict/area/tree
 router.get('/braceDict/area/tree', (_req, res) => {
@@ -2254,3 +2534,6 @@ router.post('/braceMajor/toggleStatus', async (req, res) => {
     res.status(500).json(errorResponse('状态切换失败: ' + error.message))
   }
 })
+
+export default router
+

@@ -725,139 +725,173 @@ const handleCoreExtract = async (req: any, res: any) => {
     const newlyExtractedResults: any[] = []
     const now = new Date()
 
-    // 4.1 抽取组长
+    // 4.1 抽取组长 (支持首次抽取与不足额补抽)
     if (needLeader) {
-      let leaderWhere = `${baseWhere}`
-      const leaderParams = [...baseParams]
-
-      if (leaderMajor) {
-        leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
-          SELECT DISTINCT m.ei_id FROM expert_info_major m 
-          LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
-          WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
-        ))`
-        leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`)
-      }
-
-      let [leaderCandidates] = await pool.query<RowDataPacket[]>(
-        `SELECT b.* FROM expert_info_base b
-         WHERE ${leaderWhere}
-         ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
-        [...leaderParams, leaderNum]
+      // 检查是否已有确认同意参会的组长
+      const [agreedL] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) as cnt FROM extract_rule_result 
+         WHERE (project_id = ? OR rule_id = ?) AND (condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%') AND participate_state = 1`,
+        [pId, ruleId]
       )
-
-      if (leaderCandidates.length < leaderNum) {
-        // Fallback: 放宽专业精确匹配，确保项目能正常抽取
-        const [fallbackLeaders] = await pool.query<RowDataPacket[]>(
-          `SELECT b.* FROM expert_info_base b
-           WHERE ${baseWhere}
-           ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
-          [...baseParams, leaderNum]
-        )
-        if (fallbackLeaders.length >= leaderNum) {
-          leaderCandidates = fallbackLeaders
+      const confirmedLeader = Number(agreedL[0]?.cnt || 0)
+      if (confirmedLeader >= leaderNum) {
+        if (groupId === '1') {
+          return res.json({ code: -1, msg: '评审组长已确认同意参会，无需补抽！' })
         }
-      }
+      } else {
+        let leaderWhere = `${baseWhere}`
+        const leaderParams = [...baseParams]
 
-      if (leaderCandidates.length < leaderNum) {
-        return res.json({
-          code: -1,
-          msg: `【${leaderMajor || '评审组长专业'}】不满足抽取专家数 (缺少 ${leaderNum - leaderCandidates.length} 人)`
-        })
-      }
-
-      for (const cand of leaderCandidates) {
-        const resId = Date.now() + Math.floor(Math.random() * 10000)
-        await pool.query(
-          `INSERT INTO extract_rule_result (
-            id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
-            ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
-            notice_state, participate_state
-          ) VALUES (?, ?, ?, ?, 'leader', 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
-          [
-            resId, pId, ruleId, Date.now() + 1, cand.id, cand.id_number || '150101198001010011',
-            cand.ei_name, cand.ent_name || '自治区国土空间规划院', cand.phone || cand.account || '13847120000',
-            cand.rank_name || '正高级工程师', cand.study_major_name || leaderMajor || '地质工程'
-          ]
-        )
-        excludeEiIds.push(String(cand.id))
-        newlyExtractedResults.push({ id: resId, name: cand.ei_name, role: '组长' })
-      }
-    }
-
-    // 4.2 抽取组员
-    if (needMember) {
-      for (const m of memberMajors) {
-        const mNum = Number(m.num || 1)
-        const mMajor = m.major || ''
-        let mWhere = baseWhere
-        const mParams = [...baseParams]
-
-        if (excludeEiIds.length > 0) {
-          mWhere += ` AND CAST(b.id AS CHAR) NOT IN (${excludeEiIds.map(() => '?').join(',')})`
-          mParams.push(...excludeEiIds)
-        }
-
-        if (mMajor) {
-          mWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+        if (leaderMajor) {
+          leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
             SELECT DISTINCT m.ei_id FROM expert_info_major m 
             LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
             WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
           ))`
-          mParams.push(`%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`)
+          leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`)
         }
 
-        let [crewCandidates] = await pool.query<RowDataPacket[]>(
+        let [leaderCandidates] = await pool.query<RowDataPacket[]>(
           `SELECT b.* FROM expert_info_base b
-           WHERE ${mWhere}
-           ORDER BY RAND() LIMIT ?`,
-          [...mParams, mNum]
+           WHERE ${leaderWhere}
+           ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
+          [...leaderParams, leaderNum]
         )
 
-        if (crewCandidates.length < mNum) {
-          // Fallback: 放宽专业限制
-          const [fallbackCrew] = await pool.query<RowDataPacket[]>(
+        if (leaderCandidates.length < leaderNum) {
+          // Fallback: 放宽专业精确匹配，确保项目能正常抽取
+          const [fallbackLeaders] = await pool.query<RowDataPacket[]>(
             `SELECT b.* FROM expert_info_base b
-             WHERE ${baseWhere} ${excludeEiIds.length > 0 ? `AND CAST(b.id AS CHAR) NOT IN (${excludeEiIds.map(() => '?').join(',')})` : ''}
-             ORDER BY RAND() LIMIT ?`,
-            [...baseParams, ...excludeEiIds, mNum]
+             WHERE ${baseWhere}
+             ORDER BY (CASE WHEN COALESCE(b.leader, 2) = 1 THEN 0 ELSE 1 END), RAND() LIMIT ?`,
+            [...baseParams, leaderNum]
           )
-          if (fallbackCrew.length > 0) {
-            crewCandidates = fallbackCrew
+          if (fallbackLeaders.length >= leaderNum) {
+            leaderCandidates = fallbackLeaders
           }
         }
 
-        if (crewCandidates.length < mNum) {
+        if (leaderCandidates.length < leaderNum) {
           return res.json({
             code: -1,
-            msg: `【${mMajor || '评审组员专业'}】不满足抽取专家数 (缺少 ${mNum - crewCandidates.length} 人)`
+            msg: `【${leaderMajor || '评审组长专业'}】候选专家池不足，无法补抽 (缺少 ${leaderNum - leaderCandidates.length} 人)`
           })
         }
 
-        for (const cand of crewCandidates) {
+        for (const cand of leaderCandidates) {
           const resId = Date.now() + Math.floor(Math.random() * 10000)
           await pool.query(
             `INSERT INTO extract_rule_result (
               id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
               ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
               notice_state, participate_state
-            ) VALUES (?, ?, ?, ?, 'crew', 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
+            ) VALUES (?, ?, ?, ?, 'leader', 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
             [
-              resId, pId, ruleId, Date.now() + 2, cand.id, cand.id_number || '150101198502020022',
-              cand.ei_name, cand.ent_name || '自治区地质勘查研究所', cand.phone || cand.account || '13947130000',
-              cand.rank_name || '高级工程师', cand.study_major_name || mMajor || '矿产普查'
+              resId, pId, ruleId, Date.now() + 1, cand.id, cand.id_number || '150101198001010011',
+              cand.ei_name, cand.ent_name || '自治区国土空间规划院', cand.phone || cand.account || '13847120000',
+              cand.rank_name || '正高级工程师', cand.study_major_name || leaderMajor || '地质工程'
             ]
           )
           excludeEiIds.push(String(cand.id))
-          newlyExtractedResults.push({ id: resId, name: cand.ei_name, role: '组员' })
+          newlyExtractedResults.push({ id: resId, name: cand.ei_name, role: '组长' })
         }
       }
     }
 
-    // 5. 更新规则与项目状态为已抽取 (extract_state = 1 抽取中/待通知)
+    // 4.2 抽取组员 (支持首次抽取与按缺额人数智能补抽)
+    if (needMember) {
+      // 检查当前已有多少组员确认同意参会
+      const [agreedM] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) as cnt FROM extract_rule_result 
+         WHERE (project_id = ? OR rule_id = ?) AND (condition_key NOT LIKE '%leader%' AND condition_key NOT LIKE '%Leader%') AND participate_state = 1`,
+        [pId, ruleId]
+      )
+      const confirmedMember = Number(agreedM[0]?.cnt || 0)
+      const totalTargetMember = memberMajors.reduce((sum: number, it: any) => sum + Number(it.num || 1), 0)
+      const missingTotal = totalTargetMember - confirmedMember
+
+      if (missingTotal <= 0) {
+        if (groupId === '2') {
+          return res.json({ code: -1, msg: '评审组员已全额确认同意参会，无需补抽！' })
+        }
+      } else {
+        // 计算本次实际抽取的总缺额配额
+        let remainingNeed = missingTotal
+        for (const m of memberMajors) {
+          if (remainingNeed <= 0) break
+          const mNum = Math.min(Number(m.num || 1), remainingNeed)
+          const mMajor = m.major || ''
+          let mWhere = baseWhere
+          const mParams = [...baseParams]
+
+          if (excludeEiIds.length > 0) {
+            mWhere += ` AND CAST(b.id AS CHAR) NOT IN (${excludeEiIds.map(() => '?').join(',')})`
+            mParams.push(...excludeEiIds)
+          }
+
+          if (mMajor) {
+            mWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+              SELECT DISTINCT m.ei_id FROM expert_info_major m 
+              LEFT JOIN brace_major bm ON (m.major_code LIKE CONCAT('%', bm.major_code, '%') OR m.major_code LIKE CONCAT('%', bm.id, '%'))
+              WHERE bm.major_name LIKE ? OR m.major_code LIKE ?
+            ))`
+            mParams.push(`%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`)
+          }
+
+          let [crewCandidates] = await pool.query<RowDataPacket[]>(
+            `SELECT b.* FROM expert_info_base b
+             WHERE ${mWhere}
+             ORDER BY RAND() LIMIT ?`,
+            [...mParams, mNum]
+          )
+
+          if (crewCandidates.length < mNum) {
+            // Fallback: 放宽专业限制
+            const [fallbackCrew] = await pool.query<RowDataPacket[]>(
+              `SELECT b.* FROM expert_info_base b
+               WHERE ${baseWhere} ${excludeEiIds.length > 0 ? `AND CAST(b.id AS CHAR) NOT IN (${excludeEiIds.map(() => '?').join(',')})` : ''}
+               ORDER BY RAND() LIMIT ?`,
+              [...baseParams, ...excludeEiIds, mNum]
+            )
+            if (fallbackCrew.length > 0) {
+              crewCandidates = fallbackCrew
+            }
+          }
+
+          if (crewCandidates.length === 0) {
+            return res.json({
+              code: -1,
+              msg: `【${mMajor || '评审组员专业'}】专家库候选池已耗尽，无法补齐缺额！`
+            })
+          }
+
+          for (const cand of crewCandidates) {
+            const resId = Date.now() + Math.floor(Math.random() * 10000)
+            await pool.query(
+              `INSERT INTO extract_rule_result (
+                id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
+                ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
+                notice_state, participate_state
+              ) VALUES (?, ?, ?, ?, 'crew', 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
+              [
+                resId, pId, ruleId, Date.now() + 2, cand.id, cand.id_number || '150101198502020022',
+                cand.ei_name, cand.ent_name || '自治区地质勘查研究所', cand.phone || cand.account || '13947130000',
+                cand.rank_name || '高级工程师', cand.study_major_name || mMajor || '矿产普查'
+              ]
+            )
+            excludeEiIds.push(String(cand.id))
+            newlyExtractedResults.push({ id: resId, name: cand.ei_name, role: '组员' })
+            remainingNeed -= 1
+          }
+        }
+      }
+    }
+
+    // 5. 更新规则与项目状态为已抽取/待通知 (组长待通知 20, 组员待通知 201)
+    const nextExtractingState = groupId === '1' ? 20 : groupId === '2' ? 201 : 20
     await pool.query(
-      `UPDATE extract_rule SET extract_state = 1, start_extract_time = NOW(), last_update_time = NOW() WHERE id = ?`,
-      [ruleId]
+      `UPDATE extract_rule SET extract_state = 1, extracting_state = ?, start_extract_time = NOW(), last_update_time = NOW() WHERE id = ?`,
+      [nextExtractingState, ruleId]
     )
     await pool.query(
       `UPDATE project SET extract_state = 1 WHERE id = ?`,
@@ -1581,7 +1615,37 @@ router.get('/extractActive/downloadFinallyConfirmEisExcel', async (req, res) => 
 })
 
 router.get('/extractActive/getNotSatisfiedErrMsg', async (req, res) => {
-  res.json(successResponse(''))
+  try {
+    const { ruleId, pId } = req.query
+    const targetId = ruleId || pId
+    if (!targetId) return res.json(successResponse(''))
+
+    const [snaps] = await pool.query<RowDataPacket[]>(
+      `SELECT rule_snapshot FROM extract_rule_snapshot WHERE rule_id = ? OR rule_id IN (SELECT id FROM extract_rule WHERE project_id = ?) ORDER BY id DESC LIMIT 1`,
+      [targetId, targetId]
+    )
+    let totalExpertNum = 5
+    if (snaps[0]?.rule_snapshot) {
+      try {
+        const p = typeof snaps[0].rule_snapshot === 'string' ? JSON.parse(snaps[0].rule_snapshot) : snaps[0].rule_snapshot
+        if (p.totalExpertNum) totalExpertNum = Number(p.totalExpertNum)
+      } catch (_) {}
+    }
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as confirmed FROM extract_rule_result WHERE (rule_id = ? OR project_id = ?) AND participate_state = 1`,
+      [targetId, targetId]
+    )
+    const confirmed = Number(rows[0]?.confirmed || 0)
+
+    if (confirmed < totalExpertNum) {
+      const errMsg = `专家不满足情况：需同意参与专家总人数 ${totalExpertNum} 位；实际同意参与专家总人数 ${confirmed} 位；不满足抽取结果，请重新补充抽取，缺额 ${totalExpertNum - confirmed} 位`
+      return res.json(successResponse(errMsg))
+    }
+    res.json(successResponse(''))
+  } catch (e: any) {
+    res.json(successResponse(''))
+  }
 })
 
 // ==========================================

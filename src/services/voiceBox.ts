@@ -25,6 +25,8 @@ class VoiceBoxService {
   private reconnectTimer: NodeJS.Timeout | null = null
   private activeCalls = new Map<string, ActiveCallMeta>() // phone -> ActiveCallMeta
   private currentCall: ActiveCallMeta | null = null
+  private callResolutionResolver: ((res: { status: 'agreed' | 'rejected' | 'no_response', keypress?: string, reason?: string }) => void) | null = null
+  private callTimeoutTimer: NodeJS.Timeout | null = null
 
   constructor() {
     this.host = process.env.VOICEBOX_HOST || '192.168.2.4'
@@ -231,6 +233,55 @@ class VoiceBoxService {
           console.log(`[VoiceBox-IoT] 🔊 通话已接通 (${realtimestate})，立即向盒子下发 PlayStartRecord_Multi 播音指令...`)
           this.playNoticeAudio()
         }
+
+        // 检测到挂断 / 闲置 (idle, hangup, disconnected, 0, 挂断)
+        if (
+          realtimestate === 'idle' ||
+          realtimestate === 'hangup' ||
+          realtimestate === 'disconnected' ||
+          realtimestate === '0' ||
+          stateMsg.includes('挂断') ||
+          stateMsg.includes('空闲') ||
+          stateMsg.includes('结束')
+        ) {
+          if (this.currentCall && this.callResolutionResolver) {
+            // 延时 1.5 秒，避免按键事件比挂断包微延迟到达
+            setTimeout(() => {
+              if (this.callResolutionResolver) {
+                console.log(`[VoiceBox-IoT] 📴 通话已挂断且未收到确认按键，触发无应答流转`)
+                const resolver = this.callResolutionResolver
+                this.callResolutionResolver = null
+                if (this.callTimeoutTimer) {
+                  clearTimeout(this.callTimeoutTimer)
+                  this.callTimeoutTimer = null
+                }
+                this.currentCall = null
+                resolver({
+                  status: 'no_response',
+                  reason: '通话挂断无按键响应'
+                })
+              }
+            }, 1500)
+          }
+        }
+        return
+      }
+
+      // 4. 放音状态事件 (PlayState) 播完后恢复双向信道监听按键
+      if (msgType === 'PlayState') {
+        const dyn = data.dynamicdata || {}
+        const isPlaying = String(dyn.isplaying) === 'true'
+        if (!isPlaying) {
+          console.log(`[VoiceBox-IoT] ⏹ 语音播放完毕，切回双向通道监听专家手机按键...`)
+          this.sendWsJson({
+            command: 'openheadsettochannel_Multi',
+            arguments: { devicename: this.devicename }
+          })
+          this.sendWsJson({
+            command: 'openchanneltoheadset_Multi',
+            arguments: { devicename: this.devicename }
+          })
+        }
         return
       }
 
@@ -316,11 +367,49 @@ class VoiceBoxService {
       )
 
       console.log(`[VoiceBox-IoT] ✅ 数据库流水更新完毕: callId=${call.callId}, 结果=${remark}`)
+
+      // 触发外部等待该通话完成的队列调度器
+      if (this.callResolutionResolver) {
+        const resolver = this.callResolutionResolver
+        this.callResolutionResolver = null
+        if (this.callTimeoutTimer) {
+          clearTimeout(this.callTimeoutTimer)
+          this.callTimeoutTimer = null
+        }
+        resolver({
+          status: isAgree ? 'agreed' : isReject ? 'rejected' : 'no_response',
+          keypress: cleanKey,
+          reason: remark
+        })
+      }
     } catch (err: any) {
       console.error(`[VoiceBox-IoT] 数据库更新异常:`, err.message)
     } finally {
       this.currentCall = null
     }
+  }
+
+  /**
+   * 阻塞等待当前外呼结束或收到按键回调 (用于队列调度顺序呼叫与 5 秒延时控制)
+   */
+  public waitForCallResolution(timeoutMs = 50000): Promise<{ status: 'agreed' | 'rejected' | 'no_response', keypress?: string, reason?: string }> {
+    return new Promise((resolve) => {
+      this.callResolutionResolver = resolve
+      this.callTimeoutTimer = setTimeout(() => {
+        if (this.callResolutionResolver) {
+          console.warn('[VoiceBox-IoT] ⏰ 通话等待超时 (50秒未响应)，主动挂机释放信道...')
+          this.hangUp()
+          const resolver = this.callResolutionResolver
+          this.callResolutionResolver = null
+          this.callTimeoutTimer = null
+          this.currentCall = null
+          resolve({
+            status: 'no_response',
+            reason: '呼叫超时无应答'
+          })
+        }
+      }, timeoutMs)
+    })
   }
 
   /**

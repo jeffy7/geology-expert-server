@@ -225,7 +225,7 @@ router.post('/braceRank/delete', async (req, res) => {
 })
 
 // 3. 专家所学专业字典树 GET /etbApi/brace/braceDict/learn_major/tree
-let dynamicLearnMajorTree = [
+export let dynamicLearnMajorTree = [
   { id: '19', name: '金属矿产地质与勘查技术', grade: 0, majorStatus: 1, children: [] },
   { id: '20', name: '资源勘查工程', grade: 0, majorStatus: 1, children: [] },
   { id: '21', name: '矿山工程', grade: 0, majorStatus: 1, children: [] },
@@ -331,7 +331,7 @@ router.post('/braceDict/learn_major/delete', (req, res) => {
 })
 
 // 4. 专家学历字典列表 GET /etbApi/brace/braceDict/edu/list
-let dynamicEduList = [
+export let dynamicEduList = [
   { id: '14', name: '本科', status: 1, sort: 1 },
   { id: '15', name: '硕士研究生', status: 1, sort: 2 },
   { id: '16', name: '博士研究生', status: 1, sort: 3 },

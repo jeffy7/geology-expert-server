@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { pool } from '../config/db'
 import { successResponse, errorResponse } from '../types'
 import { voiceBoxService } from '../services/voiceBox'
+import { noticeQueueService } from '../services/noticeQueue'
 import type { RowDataPacket, ResultSetHeader } from 'mysql2'
 
 const router = Router()
@@ -24,7 +25,12 @@ router.get('/voicebox-status', (_req, res) => {
   res.json(successResponse(voiceBoxService.getStatus(), '语音盒子连接状态查询成功'))
 })
 
-// 3. 启动专家抽取外呼通知 GET /etbApi/expert-notice/start
+// 2.2 外呼排队与顺呼实时状态 GET /etbApi/expert-notice/queue-status
+router.get('/queue-status', (_req, res) => {
+  res.json(successResponse(noticeQueueService.getStatus()))
+})
+
+// 3. 启动专家抽取排队外呼通知 GET /etbApi/expert-notice/start
 router.get('/start', async (req, res) => {
   try {
     const { projectId, ruleId, groupId } = req.query
@@ -32,95 +38,21 @@ router.get('/start', async (req, res) => {
       return res.status(400).json(errorResponse('缺少必须的项目ID或规则ID'))
     }
 
-    // 1. 查询项目信息构建通知文案模板
-    const [pRows] = await pool.query<RowDataPacket[]>(
-      `SELECT project_name, project_no, bid_open_time, evaluation_room, link_phone, review_category
-       FROM project WHERE id = ?`,
-      [projectId]
+    // 启动顺序排队外呼 (单路安全顺呼，每人通话结束间隔 5 秒)
+    const queueRes = await noticeQueueService.startQueue(
+      String(projectId),
+      String(ruleId),
+      String(groupId || '1')
     )
-    const project = pRows[0] || {
-      project_name: '地调院矿产专家评审项目',
-      project_no: 'PROJECT-2026',
-      bid_open_time: new Date().toISOString(),
-      evaluation_room: '主评审室',
-      link_phone: '0471-12345678'
+
+    if (!queueRes.success) {
+      return res.json(errorResponse(queueRes.message))
     }
 
-    // 2. 查询需要通知的专家名单（关联专家库最新手机号，优先以专家库当前手机号为准）
-    let querySql = `
-      SELECT r.id, r.project_id, r.rule_id, r.ei_id, r.ei_name, COALESCE(b.phone, r.ei_phone) as ei_phone, IF(r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%', 1, 2) as leader, r.notice_state
-      FROM extract_rule_result r
-      LEFT JOIN expert_info_base b ON r.ei_id = b.id
-      WHERE r.project_id = ? AND r.rule_id = ?
-    `
-    const qParams: any[] = [projectId, ruleId]
-    if (groupId) {
-      if (String(groupId) === '1' || String(groupId).includes('leader')) {
-        querySql += ` AND (r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%')`
-      } else if (String(groupId) === '2' || String(groupId).includes('crew') || String(groupId).includes('member')) {
-        querySql += ` AND (r.condition_key NOT LIKE '%leader%' AND r.condition_key NOT LIKE '%Leader%')`
-      }
-    }
-
-    const [ruleResults] = await pool.query<RowDataPacket[]>(querySql, qParams)
-    if (!ruleResults || ruleResults.length === 0) {
-      return res.json(successResponse(null, '未找到待通知的专家记录'))
-    }
-
-    // 3. 循环发起语音盒子外呼并记录流水
-    const noticeDetails: any[] = []
-    for (const r of ruleResults) {
-      if (!r.ei_phone) continue
-
-      // 同步更新抽取结果表中的手机号为最新修改的手机号
-      await pool.query(
-        `UPDATE extract_rule_result SET ei_phone = ? WHERE id = ?`,
-        [r.ei_phone, r.id]
-      ).catch(() => {})
-
-      // 全面采用语音盒子进行真实拨号呼叫
-      const callResult = await voiceBoxService.dial(r.ei_phone, { extractRuleResultId: r.id })
-      const callId = callResult.callId || `vb-${Date.now()}-${r.id}`
-
-      // 插入/更新 notice_expert_callback 表
-      const callbackId = Date.now() + Math.floor(Math.random() * 1000)
-      await pool.query(
-        `INSERT INTO notice_expert_callback
-         (id, extrace_rule_result_id, call_id, retry_num, remark, insert_time)
-         VALUES (?, ?, ?, 0, ?, NOW())`,
-        [
-          callbackId,
-          r.id,
-          callId,
-          `已发起硬件语音盒子外呼通知 (设备: ${voiceBoxService.getStatus().devicename})`
-        ]
-      ).catch(e => console.warn('[expert-notice] 记录通知流水异常:', e.message))
-
-      // 更新 extract_rule_result 表的通知状态 notice_state = 1 (通知中)
-      await pool.query(
-        `UPDATE extract_rule_result SET notice_state = 1 WHERE id = ?`,
-        [r.id]
-      )
-
-      noticeDetails.push({
-        extractRuleResultId: r.id,
-        eiName: r.ei_name,
-        phone: r.ei_phone,
-        callId,
-        success: callResult.success
-      })
-    }
-
-    // 更新规则抽取状态为通知中 EXTRACTING_NOTICEING (21)
-    await pool.query(
-      `UPDATE extract_rule SET extracting_state = 21 WHERE id = ?`,
-      [ruleId]
-    ).catch(() => {})
-
-    res.json(successResponse({ count: noticeDetails.length, details: noticeDetails }, '专家语音盒子外呼通知已批量下发'))
+    res.json(successResponse(queueRes, queueRes.message))
   } catch (error: any) {
-    console.error('[expert-notice] 启动通知失败:', error)
-    res.status(500).json(errorResponse(error.message || '启动通知失败'))
+    console.error('[expert-notice] 启动排队通知失败:', error)
+    res.status(500).json(errorResponse(error.message || '启动排队通知失败'))
   }
 })
 

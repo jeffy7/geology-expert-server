@@ -36,7 +36,7 @@ rsync -avz -e "ssh -p $REMOTE_PORT" "$WEB_DIR/dist/" "$REMOTE_USER@$REMOTE_HOST:
 
 # 2. 传输后端编译产物、package.json 与部署配置
 ssh -p $REMOTE_PORT "$REMOTE_USER@$REMOTE_HOST" "mkdir -p $TARGET_DIR/server"
-rsync -avz -e "ssh -p $REMOTE_PORT" "$SERVER_DIR/dist" "$SERVER_DIR/package.json" "$SERVER_DIR/package-lock.json" "$SERVER_DIR/deploy" "$REMOTE_USER@$REMOTE_HOST:$TARGET_DIR/server/"
+rsync -avz -e "ssh -p $REMOTE_PORT" "$SERVER_DIR/dist" "$SERVER_DIR/package.json" "$SERVER_DIR/package-lock.json" "$SERVER_DIR/deploy" "$SERVER_DIR/templates" "$REMOTE_USER@$REMOTE_HOST:$TARGET_DIR/server/"
 
 echo ">>> [4/4] 远程服务器安装依赖并使用 PM2 重启服务..."
 ssh -p $REMOTE_PORT "$REMOTE_USER@$REMOTE_HOST" << 'EOF'

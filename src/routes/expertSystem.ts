@@ -993,6 +993,29 @@ router.get('/expertInfoAlter/:id', async (req, res) => {
       phone: baseInfo.phone || row.phone || '-'
     }
 
+    // 补充专家专业与职称列表对象数组，供前端结构化换行展示
+    try {
+      const [expertMajors] = await pool.query<RowDataPacket[]>(
+        `SELECT 
+          CAST(m.id AS CHAR) as id,
+          CAST(m.ei_id AS CHAR) as eiId,
+          m.major_code as majorCode,
+          CAST(m.rank_code AS CHAR) as rankCode,
+          IFNULL(m.major_name, bm.major_name) as majorName,
+          IFNULL(m.rank_name, r.rank_name) as rankName
+         FROM expert_info_major m
+         LEFT JOIN brace_rank r ON CAST(m.rank_code AS CHAR) = CAST(r.id AS CHAR)
+         LEFT JOIN brace_major bm ON CAST(m.major_code AS CHAR) = CAST(bm.id AS CHAR)
+         WHERE CAST(m.ei_id AS CHAR) = ?`,
+        [String(row.eiId)]
+      )
+      baseInfo.majorList = (Array.isArray(baseInfo.majorList) && baseInfo.majorList.length > 0)
+        ? baseInfo.majorList
+        : expertMajors
+    } catch (e) {
+      baseInfo.majorList = baseInfo.majorList || []
+    }
+
     try {
       if (row.diffChange) {
         diffInfos = JSON.parse(row.diffChange)
@@ -1465,7 +1488,8 @@ router.post('/expertInfoBase/update', async (req, res) => {
         edu: old.degree_name || '-',
         isLeader: old.leader ?? 0,
         isRetire: old.if_retire ?? 0,
-        phone: old.phone || '-'
+        phone: old.phone || '-',
+        majorList: oldMajors.map((m: any) => ({ majorName: m.major_name, rankName: m.rank_name }))
       }
 
       const afterInfoSnapshot = {
@@ -1482,7 +1506,8 @@ router.post('/expertInfoBase/update', async (req, res) => {
         edu: degreeName ?? old.degree_name,
         isLeader: leader !== undefined ? Number(leader) : old.leader,
         isRetire: ifRetire !== undefined ? Number(ifRetire) : old.if_retire,
-        phone: phone ?? old.phone
+        phone: phone ?? old.phone,
+        majorList: Array.isArray(majors) ? majors.map((m: any) => ({ majorName: m.majorName, rankName: m.rankName })) : baseInfoSnapshot.majorList
       }
 
       await pool.query(

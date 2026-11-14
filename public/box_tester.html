@@ -87,6 +87,7 @@
     <button class="btn-primary" onclick="startDial()">📞 发起呼叫 Dial_Multi</button>
     <button class="btn-success" onclick="answerCall()">🟢 接听来电 Answer_Multi</button>
     <button class="btn-danger" onclick="hangUp()">📴 挂断通话 HangUp_Multi</button>
+    <button class="btn-warning" onclick="sendDtmfTest('1')">🔢 通话中发送DTMF按键1 (SendDTMF_Multi)</button>
     <button class="btn-secondary" onclick="getSignal()">📶 获取4G信号强度</button>
     <button class="btn-secondary" onclick="clearLogs()">🧹 清空日志</button>
   </div>
@@ -369,6 +370,17 @@
       arguments: { devicename }
     };
     log('📴 下发 HangUp_Multi 挂断通话指令...');
+    ws.send(JSON.stringify(payload));
+  }
+
+  // 7.5 通话中发送 DTMF 按键到对方手机 (看云文档 1806082 SendDTMF_Multi)
+  function sendDtmfTest(key = '1') {
+    const devicename = document.getElementById('devicename').value.trim();
+    const payload = {
+      command: 'SendDTMF_Multi',
+      arguments: { content: String(key), devicename }
+    };
+    log(`🔢 正在下发 SendDTMF_Multi 到对方手机: [ ${key} ] -> ${JSON.stringify(payload)}`);
     ws.send(JSON.stringify(payload));
   }
 

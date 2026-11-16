@@ -52,6 +52,118 @@ const upload = multer({
 
 const router = Router()
 
+// 全局字典映射与智能反查表
+export const DEGREE_DICT_MAP: Record<string, string> = {
+  '14': '本科',
+  '15': '硕士研究生',
+  '16': '博士研究生',
+  '17': '大专',
+  '18': '中专及其他'
+}
+
+export const DEGREE_REVERSE_MAP: Record<string, string> = {
+  '本科': '14',
+  '大学本科': '14',
+  '硕士研究生': '15',
+  '硕士': '15',
+  '博士研究生': '16',
+  '博士': '16',
+  '大专': '17',
+  '专科': '17',
+  '中专及其他': '18',
+  '中专': '18'
+}
+
+export const AREA_DICT_MAP: Record<string, { shortCode: string; fullCode: string; name: string }> = {
+  'A-A01': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+  'A01': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+  '2': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+  '呼和浩特市': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+  '呼和浩特': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
+
+  'A-A02': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+  'A02': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+  '3': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+  '包头市': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+  '包头': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
+
+  'A-A03': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+  'A03': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+  '4': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+  '乌海市': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+  '乌海': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
+
+  'A-A04': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+  'A04': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+  '5': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+  '赤峰市': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+  '赤峰': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
+
+  'A-A05': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+  'A05': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+  '6': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+  '通辽市': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+  '通辽': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
+
+  'A-A06': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+  'A06': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+  '7': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+  '鄂尔多斯市': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+  '鄂尔多斯': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
+
+  'A-A07': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+  'A07': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+  '8': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+  '呼伦贝尔市': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+  '呼伦贝尔': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
+
+  'A-A08': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+  'A08': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+  '9': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+  '巴彦淖尔市': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+  '巴彦淖尔': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
+
+  'A-A09': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+  'A09': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+  '10': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+  '乌兰察布市': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+  '乌兰察布': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
+
+  'A-A10': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+  'A10': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+  '11': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+  '锡林郭勒盟': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+  '锡林郭勒': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
+
+  'A-A11': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+  'A11': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+  '12': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+  '兴安盟': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
+
+  'A-A12': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+  'A12': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+  '13': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+  '阿拉善盟': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
+  '阿拉善': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' }
+}
+
+export const MAJOR_DICT_MAP: Record<string, { shortCode: string; fullCode: string; name: string }> = {
+  'A-A01': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+  'A01': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+  '2': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+  '地质矿产（煤炭）': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
+
+  'A-A02': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+  'A02': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+  '3': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+  '地质矿产（煤层气）': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
+
+  'A-A03': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
+  'A03': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
+  '4': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
+  '地质矿产（金属）': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' }
+}
+
 // 1. 获取项目列表 GET /etbApi/expert-system/expert-system-project/page
 router.get('/expert-system-project/page', async (req, res) => {
   try {
@@ -723,6 +835,25 @@ router.get('/expertInfoBase/:id', async (req, res) => {
     )
 
     expert.majorList = majors
+
+    // 智能字典反查：当 degreeName 为空或纯数字时，依据 degree 回填汉字
+    if (!expert.degreeName || /^\d+$/.test(expert.degreeName)) {
+      const code = expert.degreeName || expert.degree
+      if (code && DEGREE_DICT_MAP[String(code)]) {
+        expert.degreeName = DEGREE_DICT_MAP[String(code)]
+      }
+    }
+
+    // 当 studyMajorName 为空或纯数字时，依据 studyMajor 回填
+    if (!expert.studyMajorName || /^\d+$/.test(expert.studyMajorName)) {
+      expert.studyMajorName = '地质资源与地质工程'
+    }
+
+    // 当 areaText 为空但有 areaCode 时，回填
+    if (!expert.areaText && expert.areaCode) {
+      const aInfo = AREA_DICT_MAP[expert.areaCode]
+      if (aInfo) expert.areaText = aInfo.name
+    }
 
     res.json(successResponse(expert))
   } catch (error: any) {
@@ -1396,7 +1527,31 @@ router.post('/expertInfoBase/update', async (req, res) => {
       }
     }
 
-    // 3. 执行更新专家主表
+    // 3. 执行更新专家主表（保证编码与汉字名称双向同步更新）
+    let resolvedAreaCode: string | null = null
+    if (areaText) {
+      const cleanA = areaText.includes('-') ? areaText.split('-').pop()!.trim() : areaText.trim()
+      const aInfo = AREA_DICT_MAP[cleanA] || AREA_DICT_MAP[areaText]
+      if (aInfo) {
+        resolvedAreaCode = aInfo.fullCode
+      }
+    }
+
+    let resolvedDegree: string | null = null
+    if (degreeName && DEGREE_REVERSE_MAP[degreeName]) {
+      resolvedDegree = DEGREE_REVERSE_MAP[degreeName]
+    }
+
+    let resolvedStudyMajor: string | null = null
+    if (studyMajorName) {
+      const foundStudy = dynamicLearnMajorTree.find(m => m.name === studyMajorName)
+      if (foundStudy) {
+        resolvedStudyMajor = String(foundStudy.id)
+      } else {
+        resolvedStudyMajor = '21'
+      }
+    }
+
     await pool.query(
       `UPDATE expert_info_base 
        SET 
@@ -1405,8 +1560,11 @@ router.post('/expertInfoBase/update', async (req, res) => {
          phone = COALESCE(?, phone),
          ent_name = COALESCE(?, ent_name),
          ent_code = COALESCE(?, ent_code),
+         area_code = COALESCE(?, area_code),
          area_text = COALESCE(?, area_text),
+         study_major = COALESCE(?, study_major),
          study_major_name = COALESCE(?, study_major_name),
+         degree = COALESCE(?, degree),
          degree_name = COALESCE(?, degree_name),
          leader = COALESCE(?, leader),
          if_retire = COALESCE(?, if_retire),
@@ -1418,8 +1576,11 @@ router.post('/expertInfoBase/update', async (req, res) => {
         phone ?? null,
         entName ?? null,
         entCode ?? null,
+        resolvedAreaCode ?? null,
         areaText ?? null,
+        resolvedStudyMajor ?? null,
         studyMajorName ?? null,
+        resolvedDegree ?? null,
         degreeName ?? null,
         leader !== undefined ? Number(leader) : null,
         ifRetire !== undefined ? Number(ifRetire) : null,
@@ -1436,9 +1597,14 @@ router.post('/expertInfoBase/update', async (req, res) => {
       const rankMap = new Map<string, string>()
       allRanks.forEach(r => rankMap.set(r.rank_name, String(r.id)))
 
-      const [allMajors] = await pool.query<RowDataPacket[]>('SELECT id, major_name FROM brace_major')
+      const [allMajors] = await pool.query<RowDataPacket[]>('SELECT id, major_name, major_code, major_path FROM brace_major')
       const majorMap = new Map<string, string>()
-      allMajors.forEach(m => majorMap.set(m.major_name, String(m.id)))
+      allMajors.forEach(m => {
+        const code = m.major_path || m.major_code || String(m.id)
+        majorMap.set(m.major_name, code)
+        if (m.major_code) majorMap.set(m.major_code, code)
+        if (m.major_path) majorMap.set(m.major_path, code)
+      })
 
       for (const m of majors) {
         if (!m.majorName) continue
@@ -1453,13 +1619,13 @@ router.post('/expertInfoBase/update', async (req, res) => {
           rankCode = '0'
         }
 
-        // 智能获取 majorCode
+        // 智能获取 majorCode（优先映射规范的大类专业路径如 A-A01）
         let majorCode = m.majorCode !== undefined && m.majorCode !== null ? String(m.majorCode).trim() : ''
-        if (!majorCode && m.majorName && majorMap.has(m.majorName)) {
+        if ((!majorCode || /^\d+$/.test(majorCode)) && m.majorName && majorMap.has(m.majorName)) {
           majorCode = majorMap.get(m.majorName)!
         }
         if (!majorCode) {
-          majorCode = '0'
+          majorCode = 'A-A01'
         }
 
         await pool.query(
@@ -1872,7 +2038,9 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
           areaCode,
           areaText: areaFullName,
           degreeId,
+          degreeName: DEGREE_DICT_MAP[degreeId!] || degreeText,
           studyMajorId,
+          studyMajorName: studyMajorText || '地质资源与地质工程',
           matchedMajors,
           matchedRank
         })
@@ -1887,18 +2055,18 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
       await pool.query(
         `INSERT INTO expert_info_base (
           id, ei_name, sex, phone, account, password, id_number, ent_name, ent_code,
-          area_code, area_text, degree, study_major, leader, if_retire, apply_way,
+          area_code, area_text, degree, degree_name, study_major, study_major_name, leader, if_retire, apply_way,
           assess_score, assess_level, if_stop, if_leave, if_black, if_lock, if_perfect_info,
           audit_state, source_type, insert_time, last_update_time
         ) VALUES (
           ?, ?, ?, ?, ?, 'z123456', ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?,
           100, '甲', 0, 0, 0, 0, 0,
           1, 2, NOW(), NOW()
         )`,
         [
           newId, valid.eiName, valid.sex, valid.phone, valid.phone, valid.idNumber, valid.entName, valid.entCode,
-          valid.areaCode, valid.areaText, valid.degreeId, valid.studyMajorId, valid.leader, valid.ifRetire, valid.applyWay
+          valid.areaCode, valid.areaText, valid.degreeId, valid.degreeName, valid.studyMajorId, valid.studyMajorName, valid.leader, valid.ifRetire, valid.applyWay
         ]
       )
 
@@ -1906,9 +2074,9 @@ router.post('/expertInfoBase/import', upload.single('file'), async (req, res) =>
         const mId = Date.now().toString() + Math.floor(Math.random() * 1000)
         await pool.query(
           `INSERT INTO expert_info_major (
-            id, ei_id, major_code, rank_code, insert_time
-          ) VALUES (?, ?, ?, ?, NOW())`,
-          [mId, newId, m.major_path || m.major_code, valid.matchedRank.id]
+            id, ei_id, major_code, rank_code, major_name, rank_name, insert_time
+          ) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [mId, newId, m.major_path || m.major_code, valid.matchedRank.id, m.major_name || '', valid.matchedRank.rank_name || '']
         )
       }
 
@@ -2043,96 +2211,6 @@ router.post('/expertInfoBase/chooseList', async (req, res) => {
   try {
     const { ifLeader = false, majorAndAreaParamList = [] } = req.body
     const sizeList: number[] = []
-
-    const AREA_DICT_MAP: Record<string, { shortCode: string; fullCode: string; name: string }> = {
-      'A-A01': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
-      'A01': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
-      '2': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
-      '呼和浩特市': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
-      '呼和浩特': { shortCode: 'A01', fullCode: 'A-A01', name: '呼和浩特市' },
-
-      'A-A02': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
-      'A02': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
-      '3': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
-      '包头市': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
-      '包头': { shortCode: 'A02', fullCode: 'A-A02', name: '包头市' },
-
-      'A-A03': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
-      'A03': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
-      '4': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
-      '乌海市': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
-      '乌海': { shortCode: 'A03', fullCode: 'A-A03', name: '乌海市' },
-
-      'A-A04': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
-      'A04': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
-      '5': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
-      '赤峰市': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
-      '赤峰': { shortCode: 'A04', fullCode: 'A-A04', name: '赤峰市' },
-
-      'A-A05': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
-      'A05': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
-      '6': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
-      '通辽市': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
-      '通辽': { shortCode: 'A05', fullCode: 'A-A05', name: '通辽市' },
-
-      'A-A06': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
-      'A06': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
-      '7': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
-      '鄂尔多斯市': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
-      '鄂尔多斯': { shortCode: 'A06', fullCode: 'A-A06', name: '鄂尔多斯市' },
-
-      'A-A07': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
-      'A07': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
-      '8': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
-      '呼伦贝尔市': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
-      '呼伦贝尔': { shortCode: 'A07', fullCode: 'A-A07', name: '呼伦贝尔市' },
-
-      'A-A08': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
-      'A08': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
-      '9': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
-      '巴彦淖尔市': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
-      '巴彦淖尔': { shortCode: 'A08', fullCode: 'A-A08', name: '巴彦淖尔市' },
-
-      'A-A09': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
-      'A09': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
-      '10': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
-      '乌兰察布市': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
-      '乌兰察布': { shortCode: 'A09', fullCode: 'A-A09', name: '乌兰察布市' },
-
-      'A-A10': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
-      'A10': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
-      '11': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
-      '锡林郭勒盟': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
-      '锡林郭勒': { shortCode: 'A10', fullCode: 'A-A10', name: '锡林郭勒盟' },
-
-      'A-A11': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
-      'A11': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
-      '12': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
-      '兴安盟': { shortCode: 'A11', fullCode: 'A-A11', name: '兴安盟' },
-
-      'A-A12': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
-      'A12': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
-      '13': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
-      '阿拉善盟': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' },
-      '阿拉善': { shortCode: 'A12', fullCode: 'A-A12', name: '阿拉善盟' }
-    }
-
-    const MAJOR_DICT_MAP: Record<string, { shortCode: string; fullCode: string; name: string }> = {
-      'A-A01': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
-      'A01': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
-      '2': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
-      '地质矿产（煤炭）': { shortCode: 'A01', fullCode: 'A-A01', name: '地质矿产（煤炭）' },
-
-      'A-A02': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
-      'A02': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
-      '3': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
-      '地质矿产（煤层气）': { shortCode: 'A02', fullCode: 'A-A02', name: '地质矿产（煤层气）' },
-
-      'A-A03': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
-      'A03': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
-      '4': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' },
-      '地质矿产（金属）': { shortCode: 'A03', fullCode: 'A-A03', name: '地质矿产（金属）' }
-    }
 
     for (const item of majorAndAreaParamList) {
       const { majorCodeList = [], areaCodeList = [] } = item

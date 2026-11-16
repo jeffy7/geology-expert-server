@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { pool } from '../config/db'
 import { successResponse, errorResponse } from '../types'
 import { sendTtsVoice } from '../services/vms'
+import { voiceBoxService } from '../services/voiceBox'
 import { NATIVE_MAJOR_TREE, NATIVE_AREA_TREE } from '../constants/nativeDictionaries'
 import type { RowDataPacket, ResultSetHeader } from 'mysql2'
 
@@ -772,10 +773,12 @@ const handleCoreExtract = async (req: any, res: any) => {
          FROM extract_rule_result WHERE CAST(project_id AS CHAR) = ? AND avoidance_flag = 1`,
         [String(pId)]
       )
-      // 查找本次补抽已抽出的专家
+      // 查找本次补抽已抽出且未明确拒绝参会的有效专家
       const [curSuppList] = await pool.query<RowDataPacket[]>(
         `SELECT condition_key, IF(condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%', 1, 2) as leader
-         FROM extract_rule_result WHERE CAST(project_id AS CHAR) = ? AND CAST(rule_id AS CHAR) = ?`,
+         FROM extract_rule_result 
+         WHERE CAST(project_id AS CHAR) = ? AND CAST(rule_id AS CHAR) = ?
+           AND COALESCE(participate_state, -1) != 0 AND COALESCE(avoidance_flag, 0) = 0`,
         [String(pId), String(ruleId)]
       )
 
@@ -823,7 +826,7 @@ const handleCoreExtract = async (req: any, res: any) => {
       // 检查是否已有确认同意参会的组长
       const [agreedL] = await pool.query<RowDataPacket[]>(
         `SELECT COUNT(*) as cnt FROM extract_rule_result 
-         WHERE (project_id = ? OR rule_id = ?) AND (condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%') AND participate_state = 1`,
+         WHERE (project_id = ? OR rule_id = ?) AND (condition_key LIKE '%leader%' OR condition_key LIKE '%Leader%') AND participate_state = 1 AND COALESCE(avoidance_flag, 0) = 0`,
         [pId, ruleId]
       )
       const confirmedLeader = Number(agreedL[0]?.cnt || 0)
@@ -847,11 +850,12 @@ const handleCoreExtract = async (req: any, res: any) => {
         }
 
         if (leaderMajor) {
-          leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+          const majorLabel = getMajorLabel(leaderMajor)
+          leaderWhere += ` AND (b.study_major_name LIKE ? OR b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
             SELECT DISTINCT m.ei_id FROM expert_info_major m 
-            WHERE m.major_name LIKE ? OR m.major_code LIKE ?
+            WHERE m.major_name LIKE ? OR m.major_name LIKE ? OR m.major_code LIKE ? OR m.major_code LIKE ?
           ))`
-          leaderParams.push(`%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${leaderMajor}%`)
+          leaderParams.push(`%${leaderMajor}%`, `%${majorLabel}%`, `%${leaderMajor}%`, `%${leaderMajor}%`, `%${majorLabel}%`, `%${leaderMajor}%`, `%${majorLabel}%`)
         }
 
         let [leaderCandidates] = await pool.query<RowDataPacket[]>(
@@ -876,12 +880,11 @@ const handleCoreExtract = async (req: any, res: any) => {
               id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
               ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
               notice_state, participate_state
-            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
             [
               resId, pId, ruleId, Date.now() + 1, isSupplement ? 'leaderSupplement' : 'leader', cand.id, cand.id_number || '150101198001010011',
               cand.ei_name, cand.ent_name || '自治区国土空间规划院', cand.phone || cand.account || '13847120000',
-              cand.rank_name || '正高级工程师', cand.study_major_name || leaderMajor || '地质工程',
-              isSupplement ? 1 : 0, isSupplement ? 1 : null
+              cand.rank_name || '正高级工程师', cand.study_major_name || leaderMajor || '地质工程'
             ]
           )
           excludeEiIds.push(String(cand.id))
@@ -895,7 +898,7 @@ const handleCoreExtract = async (req: any, res: any) => {
       // 检查当前已有多少组员确认同意参会
       const [agreedM] = await pool.query<RowDataPacket[]>(
         `SELECT COUNT(*) as cnt FROM extract_rule_result 
-         WHERE (project_id = ? OR rule_id = ?) AND (condition_key NOT LIKE '%leader%' AND condition_key NOT LIKE '%Leader%') AND participate_state = 1`,
+         WHERE (project_id = ? OR rule_id = ?) AND (condition_key NOT LIKE '%leader%' AND condition_key NOT LIKE '%Leader%') AND participate_state = 1 AND COALESCE(avoidance_flag, 0) = 0`,
         [pId, ruleId]
       )
       const confirmedMember = Number(agreedM[0]?.cnt || 0)
@@ -934,11 +937,12 @@ const handleCoreExtract = async (req: any, res: any) => {
           }
 
           if (mMajor) {
-            mWhere += ` AND (b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
+            const mMajorLabel = getMajorLabel(mMajor)
+            mWhere += ` AND (b.study_major_name LIKE ? OR b.study_major_name LIKE ? OR b.study_major LIKE ? OR b.id IN (
               SELECT DISTINCT m.ei_id FROM expert_info_major m 
-              WHERE m.major_name LIKE ? OR m.major_code LIKE ?
+              WHERE m.major_name LIKE ? OR m.major_name LIKE ? OR m.major_code LIKE ? OR m.major_code LIKE ?
             ))`
-            mParams.push(`%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`, `%${mMajor}%`)
+            mParams.push(`%${mMajor}%`, `%${mMajorLabel}%`, `%${mMajor}%`, `%${mMajor}%`, `%${mMajorLabel}%`, `%${mMajor}%`, `%${mMajorLabel}%`)
           }
 
           let [crewCandidates] = await pool.query<RowDataPacket[]>(
@@ -963,12 +967,11 @@ const handleCoreExtract = async (req: any, res: any) => {
                 id, project_id, rule_id, condition_id, condition_key, ext_batch_num, ei_id, ei_card_no,
                 ei_name, ei_ent_name, ei_phone, ei_rank, ei_majors, extract_time,
                 notice_state, participate_state
-              ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)`,
+              ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, NOW(), 0, NULL)`,
               [
                 resId, pId, ruleId, Date.now() + 2, isSupplement ? 'crewSupplement' : 'crew', cand.id, cand.id_number || '150101198502020022',
                 cand.ei_name, cand.ent_name || '自治区地质勘查研究所', cand.phone || cand.account || '13947130000',
-                cand.rank_name || '高级工程师', cand.study_major_name || mMajor || '矿产普查',
-                isSupplement ? 1 : 0, isSupplement ? 1 : null
+                cand.rank_name || '高级工程师', cand.study_major_name || mMajor || '矿产普查'
               ]
             )
             excludeEiIds.push(String(cand.id))
@@ -1031,35 +1034,68 @@ router.post('/extractRule/extract', handleCoreExtract)
 router.post('/extractActive/sendNotice', async (req, res) => {
   try {
     const { projectId, ruleId, groupId = '' } = req.body || req.query || {}
-    // 转发至 /etbApi/expert-notice/start
+    let targetRuleId = ruleId
+    let pId = projectId
+
+    if (!pId && targetRuleId) {
+      const [rRows] = await pool.query<RowDataPacket[]>(
+        'SELECT CAST(project_id AS CHAR) as projectId FROM extract_rule WHERE id = ? LIMIT 1',
+        [targetRuleId]
+      )
+      if (rRows[0]?.projectId) pId = rRows[0].projectId
+    }
+
+    // 筛选待通知专家（未通知 notice_state = 0 或 NULL，且未回避）
+    let whereClause = `WHERE (r.notice_state = 0 OR r.notice_state IS NULL) AND COALESCE(r.avoidance_flag, 0) = 0`
+    const params: any[] = []
+
+    if (targetRuleId) {
+      whereClause += ` AND CAST(r.rule_id AS CHAR) = ?`
+      params.push(String(targetRuleId))
+    } else if (pId) {
+      whereClause += ` AND CAST(r.project_id AS CHAR) = ?`
+      params.push(String(pId))
+    }
+
+    if (groupId === '1') {
+      whereClause += ` AND (r.condition_key LIKE '%leader%' OR r.condition_key LIKE '%Leader%')`
+    } else if (groupId === '2') {
+      whereClause += ` AND (r.condition_key NOT LIKE '%leader%' AND r.condition_key NOT LIKE '%Leader%')`
+    }
+
     const [resultRows] = await pool.query<RowDataPacket[]>(
-      `SELECT r.id, r.ei_id, b.ei_name, b.phone
+      `SELECT r.id, r.ei_id, r.ei_name, r.ei_phone
        FROM extract_rule_result r
-       JOIN expert_info_base b ON r.ei_id = b.id
-       WHERE (? IS NULL OR r.rule_id = ?)
+       ${whereClause}
        ORDER BY r.id DESC`,
-      [ruleId || null, ruleId || null]
+      params
     )
 
     for (const row of resultRows) {
+      const callbackId = Date.now() + Math.floor(Math.random() * 1000)
+      const callId = `call-${Date.now()}-${row.id}`
       await pool.query(
         `INSERT INTO notice_expert_callback 
-          (extrace_rule_result_id, call_state, participate_state, retry_num, remark, create_time)
-         VALUES (?, 1, 0, 1, '系统已下发语音外呼通知', NOW())`,
-        [row.id]
+          (id, extrace_rule_result_id, call_id, retry_num, remark, insert_time)
+         VALUES (?, ?, ?, 1, '系统已下发语音外呼通知', NOW())`,
+        [callbackId, row.id, callId]
       )
       await pool.query(
         `UPDATE extract_rule_result SET notice_state = 1 WHERE id = ?`,
         [row.id]
       )
+      if (row.ei_phone) {
+        voiceBoxService.dial(row.ei_phone, { extractRuleResultId: row.id }).catch(() => {})
+      }
     }
 
     res.json(successResponse({
       totalNotified: resultRows.length,
-      projectId,
-      ruleId
+      projectId: pId,
+      ruleId: targetRuleId
     }, '外呼通知已下发成功！'))
   } catch (error: any) {
+    console.error('下发通知异常:', error)
     res.status(500).json(errorResponse('下发通知失败: ' + error.message))
   }
 })
@@ -1276,14 +1312,55 @@ router.get('/sextRule/page', async (req, res) => {
 
 router.get('/sextRule/getRuleInfoHistory', async (req, res) => {
   try {
-    const { ruleId } = req.query
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT CAST(id AS CHAR) as id, rule_snapshot as ruleSnapshot, audit_state as auditState,
-              DATE_FORMAT(create_time, '%Y-%m-%d %H:%i:%s') as createTime
-       FROM extract_rule_snapshot WHERE rule_id = ? OR project_id = ? ORDER BY id DESC`,
-      [ruleId, ruleId]
-    )
-    res.json(successResponse(rows))
+    const { ruleId, projectId } = req.query
+    let pId = projectId ? String(projectId) : ''
+
+    if (!pId && ruleId) {
+      const [rRows] = await pool.query<RowDataPacket[]>(
+        'SELECT CAST(project_id AS CHAR) as projectId FROM extract_rule WHERE id = ? LIMIT 1',
+        [ruleId]
+      )
+      if (rRows[0]?.projectId) pId = rRows[0].projectId
+    }
+
+    // 查询该项目下所有真实的补抽规则（event_type = 2，禁止使用任何冗余 JOIN 避免复制数据）
+    let list: any[] = []
+    if (pId) {
+      const [suppRules] = await pool.query<RowDataPacket[]>(
+        `SELECT CAST(r.id AS CHAR) as ruleId, CAST(r.project_id AS CHAR) as projectId,
+                r.extract_state as extractState, r.audit_state as auditState,
+                DATE_FORMAT(r.insert_time, '%Y-%m-%d %H:%i:%s') as createTime
+         FROM extract_rule r
+         WHERE CAST(r.project_id AS CHAR) = ? AND r.event_type = 2
+         ORDER BY r.id ASC`,
+        [pId]
+      )
+
+      for (let idx = 0; idx < suppRules.length; idx++) {
+        const item = suppRules[idx]
+        // 动态核查该补抽轮次是否有已确认同意参会的专家，严禁硬编码 extractState = 1
+        const [confirmed] = await pool.query<RowDataPacket[]>(
+          `SELECT COUNT(*) as cnt FROM extract_rule_result 
+           WHERE (CAST(rule_id AS CHAR) = ? OR (CAST(project_id AS CHAR) = ? AND condition_key LIKE '%Supplement%'))
+             AND participate_state = 1 AND COALESCE(avoidance_flag, 0) = 0`,
+          [item.ruleId, item.projectId]
+        )
+        const isDone = Number(confirmed[0]?.cnt || 0) > 0
+        list.push({
+          id: item.ruleId,
+          ruleId: item.ruleId,
+          projectId: item.projectId,
+          num: idx + 1,
+          title: `第${idx + 1}次补抽申请`,
+          extractState: isDone ? 1 : 0,
+          auditState: item.auditState,
+          createTime: item.createTime
+        })
+      }
+    }
+
+    // 严禁伪造假数据：没有补抽规则时返回空数组
+    res.json(successResponse(list))
   } catch (error: any) {
     res.status(500).json(errorResponse(error.message))
   }

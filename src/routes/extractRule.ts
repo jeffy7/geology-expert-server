@@ -1700,6 +1700,14 @@ router.get('/extractActive/getRuleResultByPIdAndRuleId', async (req, res) => {
       r.avoidance_remark as avoidanceRemark
     `
 
+    const formatRow = (r: any) => ({
+      ...r,
+      leader: Number(r.leader),
+      avoidanceFlag: Number(r.avoidanceFlag),
+      isAvoid: Number(r.avoidanceFlag) === 1 ? 1 : 0,
+      noticeState: Number(r.noticeState || 0)
+    })
+
     // 1. 初次抽取或历史抽取记录 (除本次补抽规则外)
     let notContainCurrentResult: any[] = []
     if (projectId) {
@@ -1711,7 +1719,7 @@ router.get('/extractActive/getRuleResultByPIdAndRuleId', async (req, res) => {
          ORDER BY leader ASC, r.id ASC`,
         [projectId, targetRuleId || '0']
       )
-      notContainCurrentResult = notRows
+      notContainCurrentResult = notRows.map(formatRow)
     }
 
     // 2. 本次补抽抽出的替补专家 (仅限本次补抽规则)
@@ -1725,7 +1733,7 @@ router.get('/extractActive/getRuleResultByPIdAndRuleId', async (req, res) => {
          ORDER BY leader ASC, r.id ASC`,
         [projectId, targetRuleId]
       )
-      currentResult = curRows
+      currentResult = curRows.map(formatRow)
     }
 
     // 3. 统计回避情况 (严格对齐 Java ExtractRuleResultServiceImpl.java:438-474)

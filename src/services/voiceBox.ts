@@ -267,20 +267,12 @@ class VoiceBoxService {
         return
       }
 
-      // 4. 放音状态事件 (PlayState) 播完后恢复双向信道监听按键
+      // 4. 放音状态事件 (PlayState) 播完后保持静音监听按键（对齐逆向原厂工程，严禁下发 openheadset/openchannel 干扰解调）
       if (msgType === 'PlayState') {
-        const dyn = data.dynamicdata || {}
+        const dyn = typeof data.dynamicdata === 'string' ? JSON.parse(data.dynamicdata || '{}') : (data.dynamicdata || {})
         const isPlaying = String(dyn.isplaying) === 'true'
         if (!isPlaying) {
-          console.log(`[VoiceBox-IoT] ⏹ 语音播放完毕，切回双向通道监听专家手机按键...`)
-          this.sendWsJson({
-            command: 'openheadsettochannel_Multi',
-            arguments: { devicename: this.devicename }
-          })
-          this.sendWsJson({
-            command: 'openchanneltoheadset_Multi',
-            arguments: { devicename: this.devicename }
-          })
+          console.log(`[VoiceBox-IoT] ⏹ 语音播放完毕，保持信道静默等待专家手机按键...`)
         }
         return
       }

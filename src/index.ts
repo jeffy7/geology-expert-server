@@ -11,6 +11,8 @@ import expertSystemRoutes from './routes/expertSystem'
 import extractRuleRoutes from './routes/extractRule'
 import dictToolsRoutes from './routes/dictTools'
 import expertNoticeRoutes from './routes/expertNotice'
+import systemRoutes from './routes/system'
+import { initRbacDatabase } from './services/rbacService'
 import { successResponse, errorResponse } from './types'
 import { vmsConfig } from './services/vms'
 import { voiceBoxService } from './services/voiceBox'
@@ -69,6 +71,7 @@ app.use('/etbApi/iot', dictToolsRoutes)
 app.use('/etbApi/project', projectRoutes)
 app.use('/etbApi/expert', expertRoutes)
 app.use('/etbApi/expert-notice', expertNoticeRoutes)
+app.use('/etbApi/system', systemRoutes)
 
 // 404 处理
 app.use((req, res) => {
@@ -83,6 +86,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 app.listen(PORT, '0.0.0.0', async () => {
   await testDbConnection()
+  await initRbacDatabase()
   if (vmsConfig.channel === 'voicebox') {
     voiceBoxService.start()
   }

@@ -159,11 +159,35 @@ export const MASTER_MENU_TREE: ServerMenuItem[] = [
   }
 ]
 
-// 递归获取所有菜单项的全部 ID
-export function getAllMenuIds(tree: ServerMenuItem[] = MASTER_MENU_TREE): number[] {
+// 仅获取用于在前端角色权限树中勾选的可见菜单（剔除 hidden: true 的详情/录入等内页）
+export function getVisibleMenuTree(tree: ServerMenuItem[] = MASTER_MENU_TREE): ServerMenuItem[] {
+  const result: ServerMenuItem[] = []
+
+  for (const item of tree) {
+    if (item.meta?.hidden) {
+      continue
+    }
+
+    if (item.children && item.children.length > 0) {
+      const visibleChildren = getVisibleMenuTree(item.children)
+      result.push({
+        ...item,
+        children: visibleChildren
+      })
+    } else {
+      result.push({ ...item })
+    }
+  }
+
+  return result
+}
+
+// 递归获取所有可见菜单项的全部 ID
+export function getVisibleMenuIds(tree: ServerMenuItem[] = MASTER_MENU_TREE): number[] {
   const ids: number[] = []
   const traverse = (nodes: ServerMenuItem[]) => {
     for (const node of nodes) {
+      if (node.meta?.hidden) continue
       ids.push(node.id)
       if (node.children && node.children.length > 0) {
         traverse(node.children)
@@ -174,16 +198,20 @@ export function getAllMenuIds(tree: ServerMenuItem[] = MASTER_MENU_TREE): number
   return ids
 }
 
-// 递归根据允许的 MenuId 集合过滤菜单树
+// 递归根据允许的 MenuId 集合过滤完整路由树
+// 规则：只要主菜单被授权，其所属的详情、录入等内部子页面 (hidden: true) 自动继承授权，避免单独配置
 export function filterMenuTree(tree: ServerMenuItem[], allowedIds: Set<number>, parentAllowed = false): ServerMenuItem[] {
   const result: ServerMenuItem[] = []
 
   for (const item of tree) {
     const isCurrentAllowed = allowedIds.has(item.id)
-    const isHiddenChild = Boolean(item.meta?.hidden) && (parentAllowed || isCurrentAllowed)
 
     if (item.children && item.children.length > 0) {
-      const filteredChildren = filterMenuTree(item.children, allowedIds, isCurrentAllowed || parentAllowed)
+      // 检查当前子级中是否有被显式允许的可见节点
+      const hasAllowedChild = item.children.some((c) => allowedIds.has(c.id))
+      const shouldAllowChildren = isCurrentAllowed || parentAllowed || hasAllowedChild
+
+      const filteredChildren = filterMenuTree(item.children, allowedIds, shouldAllowChildren)
       if (isCurrentAllowed || filteredChildren.length > 0) {
         result.push({
           ...item,
@@ -191,6 +219,8 @@ export function filterMenuTree(tree: ServerMenuItem[], allowedIds: Set<number>, 
         })
       }
     } else {
+      // 叶子节点：若是显式允许的菜单，或者父级模块已被授权的内部详情页 (hidden: true)，则自动放行
+      const isHiddenChild = Boolean(item.meta?.hidden) && parentAllowed
       if (isCurrentAllowed || isHiddenChild) {
         result.push({ ...item })
       }

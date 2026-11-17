@@ -4,13 +4,13 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2'
 import { successResponse, errorResponse } from '../types'
 import { authenticateToken } from '../middleware/auth'
 import { hashPassword } from '../services/rbacService'
-import { MASTER_MENU_TREE } from '../constants/masterMenus'
+import { MASTER_MENU_TREE, getVisibleMenuTree } from '../constants/masterMenus'
 
 const router = Router()
 
-// 全量菜单树结构获取（供角色授权弹窗 el-tree 勾选）
+// 全量菜单树结构获取（仅返回可见导航菜单，剔除申报录入、详情查看等内部子页面）
 router.get('/menu/tree', authenticateToken, (req, res) => {
-  res.json(successResponse(MASTER_MENU_TREE))
+  res.json(successResponse(getVisibleMenuTree(MASTER_MENU_TREE)))
 })
 
 // ==================== 1. 用户管理 ====================

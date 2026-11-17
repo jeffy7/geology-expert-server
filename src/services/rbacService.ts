@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { pool } from '../config/db'
 import { RowDataPacket, ResultSetHeader } from 'mysql2'
-import { MASTER_MENU_TREE, getAllMenuIds } from '../constants/masterMenus'
+import { MASTER_MENU_TREE, getVisibleMenuIds } from '../constants/masterMenus'
 
 export function hashPassword(password: string): string {
   return crypto.createHash('sha256').update(password + '_geology_salt_2026').digest('hex')
@@ -116,25 +116,23 @@ export async function initRbacDatabase() {
       }
     }
 
-    // 5. 初始化内置角色的初始菜单关联
+    // 5. 初始化内置角色的初始可见菜单关联（内部隐藏页面由父级菜单授权自动放行）
     const roleMenuMap: Record<string, number[]> = {
-      admin: getAllMenuIds(MASTER_MENU_TREE),
-      lxr: [1, 2, 21, 22, 23, 3, 31, 311, 32, 33, 331, 34, 35, 36, 37],
-      sck: [1, 4, 41, 42],
-      pszx: [1, 38, 312, 314, 3, 31, 311, 35, 36, 4, 41, 42],
-      zjgly: [1, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 62, 63, 64, 70, 71, 80, 81, 90, 91]
+      admin: getVisibleMenuIds(MASTER_MENU_TREE),
+      lxr: [1, 2, 21, 3, 31, 311, 32, 33, 331],
+      sck: [1, 4, 41],
+      pszx: [1, 38, 312, 3, 31, 311, 4, 41],
+      zjgly: [1, 50, 51, 52, 53, 54, 55, 56, 57, 70, 71, 80, 81, 90, 91]
     }
 
     for (const [key, menuIds] of Object.entries(roleMenuMap)) {
       const roleId = roleMap[key]
       if (!roleId) continue
 
-      // 检查当前角色是否已配置过菜单，若无则初始化
-      const [exRows] = await pool.query<RowDataPacket[]>('SELECT COUNT(*) as cnt FROM sys_role_menu WHERE role_id = ?', [roleId])
-      if (Number(exRows[0]?.cnt || 0) === 0) {
-        for (const mid of menuIds) {
-          await pool.query('INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES (?, ?)', [roleId, mid])
-        }
+      // 清理旧的多余细粒度内页 ID，并重新写入标准可见菜单
+      await pool.query('DELETE FROM sys_role_menu WHERE role_id = ?', [roleId])
+      for (const mid of menuIds) {
+        await pool.query('INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES (?, ?)', [roleId, mid])
       }
     }
 

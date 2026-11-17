@@ -8,10 +8,6 @@ export function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, hash: string): boolean {
-  // 兼顾默认弱密码以及初始哈希
-  if (password === 'password123' && hash === hashPassword('123456')) {
-    return true
-  }
   return hashPassword(password) === hash
 }
 

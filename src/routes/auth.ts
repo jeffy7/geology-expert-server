@@ -58,13 +58,16 @@ router.post('/login', async (req, res) => {
         return
       }
 
-      // 密码校验 (如传了密码则校验)
-      if (password) {
-        const isMatch = verifyPassword(password, user.password)
-        if (!isMatch) {
-          res.status(400).json(errorResponse('密码错误，请重新输入'))
-          return
-        }
+      // 严格校验密码
+      if (!password) {
+        res.status(400).json(errorResponse('请输入密码'))
+        return
+      }
+
+      const isMatch = verifyPassword(password, user.password)
+      if (!isMatch) {
+        res.status(400).json(errorResponse('密码错误，请核对后重试'))
+        return
       }
 
       const roleKey = user.roleKey || 'lxr'
@@ -105,24 +108,9 @@ router.post('/login', async (req, res) => {
       return
     }
 
-    // 2. 兜底未入库账号：按预设角色快速通过
-    const matchedUser = SYSTEM_ROLES[loginUser] || SYSTEM_ROLES['lxr']
-    const token = generateUserToken(loginUser)
-
-    res.json(
-      successResponse({
-        access_token: token,
-        token_type: 'Bearer',
-        expires_in: 604800,
-        user_info: {
-          username: loginUser,
-          roleId: matchedUser.roleId,
-          roleName: matchedUser.roleName,
-          realName: matchedUser.realName,
-          department: matchedUser.department
-        }
-      }, '登录成功')
-    )
+    // 账号在系统用户表中不存在
+    res.status(404).json(errorResponse('该账号不存在，请联系管理员分配账号'))
+    return
   } catch (error: any) {
     console.error('[Auth] 登录处理异常:', error)
     res.status(500).json(errorResponse('登录处理异常: ' + error.message))
